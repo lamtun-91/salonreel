@@ -259,14 +259,16 @@ module.exports = ({ app, llm, parseJSON, run, probe, cfg, TRACKS, D, id, wrap })
     const ctx = { shots: p.plan.shots, clips: p.clips, qc: p.qc, mood: p.inputs.mood, music: p.inputs.music, style: p.inputs.style };
     p.edit = live() ? S.cleanEdit(parseJSON(await llm({ system: 'You are a short-form video editor. Reply with JSON only.', text: S.editPrompt(ctx) })), ctx) : S.mockEdit(ctx);
     p.edit.mode = live() ? 'live' : 'demo';
-    const look = { has_haircut: p.qc.has_haircut !== false, clip_breakdown: S.breakdownFor(p.edit, p.qc) }, prof = { ...p.profile };
+    const override = S.haircutOverride(q.body, p.qc);
+    if (override) p.qc_override = override;
+    const look = { has_haircut: p.qc.has_haircut !== false || !!override, clip_breakdown: S.breakdownFor(p.edit, p.qc) }, prof = { ...p.profile };
     let copy;
     if (!look.has_haircut) copy = { error: 'no_haircut' };
     else if (live()) copy = P.cleanCopy(parseJSON(await llm({ system: P.copySystem, text: P.copyPrompt({ look, tone: p.inputs.mood, profile: prof, duration: p.edit.total }) })), p.edit.total);
     else copy = P.cleanCopy(P.mockCopy({ ...look, cut: 'Fresh cut', color: 'Signature color', tags: [] }, String(p.inputs.mood).toLowerCase(), prof, p.edit.total), p.edit.total);
     if (copy.error) { p.status = 'needs_reshoot'; await save(p); throw new Error('no_haircut'); }
     p.edit.overlays = copy.script; p.copy = { caption: copy.caption, hashtags: copy.hashtags };
-    await renderProject(p); p.status = 'review';
+    await renderProject(p); p.status = 'review'; if (override) p.edit.qc_overridden = true;
     await save(p);
   }));
   app.post('/api/projects/:id/rerender', job('rerender', async q => {

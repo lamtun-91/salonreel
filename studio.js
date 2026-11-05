@@ -168,5 +168,14 @@ function segFilter(s) {
     return `[0:v]${cover},split[a][b];[a]trim=0:${h},setpts=(PTS-STARTPTS)/${s.speed}[a1];[b]trim=${h},setpts=(PTS-STARTPTS)/${s.ramp_to}[b1];[a1][b1]concat=n=2:v=1:a=0,fps=30${zf},format=yuv420p[v]`; }
   return `[0:v]${cover},setpts=(PTS-STARTPTS)/${s.speed},fps=30${zf},format=yuv420p[v]`;
 }
-module.exports = { STYLES, MOODS, TRACK_BPM, shotPrompt, cleanShots, mockShots, splitPrompt, cleanSplit, mockSplit, qcPrompt, cleanQC, mockQC, gapReport,
+
+// Explicit human override of the "no finished haircut" QC gate. Requires confirm===true; never silently skips.
+function haircutOverride(body, qc, now = new Date()) {
+  if (!qc || qc.has_haircut !== false) return null;
+  const o = body && body.override_qc;
+  if (!o || o.confirm !== true) return null;
+  return { gate: 'no_haircut', confirmed: true, statement: 'Salon owner confirmed the finished cut is clearly visible in the real footage.',
+    reason: String(o.reason || '').slice(0, 300), by: String(o.by || 'salon owner').slice(0, 80), at: now.toISOString(), qc_overall: qc.overall || '' };
+}
+module.exports = { haircutOverride, STYLES, MOODS, TRACK_BPM, shotPrompt, cleanShots, mockShots, splitPrompt, cleanSplit, mockSplit, qcPrompt, cleanQC, mockQC, gapReport,
   editPrompt, cleanEdit, mockEdit, breakdownFor, segFilter, ffEsc, beatGrid };
