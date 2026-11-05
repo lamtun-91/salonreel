@@ -36,8 +36,8 @@ const TRACKS = {
 async function ensureMusic() {
   for (const [k, t] of Object.entries(TRACKS)) {
     if (!t.expr) continue;
-    const f = D('music', k + '.m4a');
-    if (!fs.existsSync(f)) await run('ffmpeg', ['-y', '-f', 'lavfi', '-i', `aevalsrc='${t.expr}':s=44100:d=30`, '-af', 'afade=in:d=1,afade=out:st=28:d=2', '-c:a', 'aac', f]);
+    const f = D('music', k + '_60.m4a');
+    if (!fs.existsSync(f)) await run('ffmpeg', ['-y', '-f', 'lavfi', '-i', `aevalsrc='${t.expr}':s=44100:d=60`, '-af', 'afade=in:d=0.5,afade=out:st=58:d=2', '-c:a', 'aac', f]);
   }
 }
 async function ensureSample() {
@@ -156,7 +156,7 @@ app.post('/api/render', wrap(async (q, s) => {
   const rid = id(), ass = D('tmp', rid + '.ass'), out = D('renders', rid + '.mp4');
   fs.writeFileSync(ass, P.buildAss({ lines, salon, duration, tone: String(tone).toLowerCase() }));
   const vf = `scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30,subtitles=${ass}:fontsdir=/usr/share/fonts/truetype/dejavu`;
-  const music = TRACKS[track]?.expr ? D('music', track + '.m4a') : null;
+  const music = TRACKS[track]?.expr ? D('music', track + '_60.m4a') : null;
   const args = ['-y', '-i', f]; let map;
   if (music) { args.push('-stream_loop', '-1', '-i', music);
     map = hasAudio ? ['-filter_complex', '[0:a]volume=0.35[a0];[1:a]volume=0.8[a1];[a0][a1]amix=inputs=2:duration=first[a]', '-map', '0:v', '-map', '[a]'] : ['-map', '0:v', '-map', '1:a'];
@@ -182,6 +182,8 @@ if (process.env.ENABLE_IG_PUBLISH === '1') app.post('/api/publish', wrap(async (
 }));
 app.get('/api/scheduled', (q, s) => s.json(loadJobs()));
 
-Promise.all([ensureMusic(), ensureSample()]).then(() => app.listen(PORT, () => {
+require('./routes_studio')({ app, llm, parseJSON, run, probe, cfg, TRACKS, D, id, wrap, express });
+Promise.all([ensureMusic(), ensureSample()]).then(() => app.listen(PORT, async () => {
+  console.log('Storage:', require('./storage').R2 ? 'R2 ' + await require('./storage').ensureCors([process.env.PUBLIC_BASE_URL, 'http://localhost:' + PORT].filter(Boolean)) : 'local disk');
   const c = cfg(); console.log(`SalonReel on :${PORT} | LLM ${c.provider} ${c.llmLive ? 'LIVE' : 'DEMO'} | Instagram ${c.igLive ? 'LIVE' : 'DEMO'}`);
 })).catch(e => { console.error(e); process.exit(1); });

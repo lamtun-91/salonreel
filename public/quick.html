@@ -1,0 +1,158 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SalonReel — AI Salon Promo</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,600;1,500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#fbf6f3;--ink:#2b2125;--mut:#8a7a80;--rose:#c8768a;--gold:#c9a46a;--card:#fff;--line:#eee2dd}
+*{box-sizing:border-box}body{margin:0;font-family:Inter,system-ui,sans-serif;background:var(--bg);color:var(--ink)}
+header{display:flex;align-items:center;justify-content:space-between;padding:18px 22px;border-bottom:1px solid var(--line);background:#fff8}
+.logo{font-family:'Playfair Display',serif;font-size:24px}.logo i{color:var(--rose)}
+.badge{font-size:11px;background:#f3e3e7;color:var(--rose);padding:4px 10px;border-radius:20px;font-weight:600}
+.steps{display:flex;gap:6px;justify-content:center;padding:16px;flex-wrap:wrap}
+.steps span{font-size:12px;padding:6px 12px;border-radius:20px;background:#fff;border:1px solid var(--line);color:var(--mut)}
+.steps span.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+main{max-width:980px;margin:0 auto;padding:0 16px 60px}
+section{display:none;background:var(--card);border-radius:22px;padding:26px;box-shadow:0 10px 40px #c8768a14;border:1px solid var(--line)}
+section.on{display:block;animation:f .4s}@keyframes f{from{opacity:0;transform:translateY(8px)}}
+h2{font-family:'Playfair Display',serif;font-weight:600;margin:0 0 6px;font-size:28px}p.s{color:var(--mut);margin:0 0 20px}
+.drop{border:2px dashed #e3cfd5;border-radius:18px;padding:40px;text-align:center;cursor:pointer;background:#fdf9f8}
+.btn{border:0;border-radius:30px;padding:12px 22px;font:600 14px Inter;cursor:pointer;background:var(--ink);color:#fff}
+.btn:disabled{opacity:.45;cursor:default}
+.btn.ghost{background:#fff;color:var(--ink);border:1px solid var(--line)}.btn.rose{background:linear-gradient(135deg,var(--rose),var(--gold))}
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}.grid{display:grid;grid-template-columns:1fr 1fr;gap:22px}
+@media(max-width:720px){.grid{grid-template-columns:1fr}section{padding:18px}}
+video{width:100%;border-radius:14px;background:#000;max-height:320px;object-fit:cover}
+.bar{height:8px;background:#f1e6e9;border-radius:9px;overflow:hidden;margin:14px 0}.bar div{height:100%;width:0;background:linear-gradient(90deg,var(--rose),var(--gold));transition:width .2s}
+.kv{display:grid;grid-template-columns:110px 1fr;gap:10px;font-size:14px}.kv b{color:var(--mut);font-weight:500}
+.tag{display:inline-block;background:#f6ecef;color:#9b4f63;border-radius:20px;padding:5px 11px;font-size:12px;margin:3px}
+textarea,input,select{width:100%;border:1px solid var(--line);border-radius:12px;padding:11px;font:14px Inter;background:#fdfbfa;color:var(--ink)}
+label{font-size:12px;font-weight:600;color:var(--mut);display:block;margin:12px 0 5px;text-transform:uppercase;letter-spacing:.06em}
+.tones button{border:1px solid var(--line);background:#fff;border-radius:20px;padding:8px 16px;cursor:pointer;font:500 13px Inter}
+.tones button.on{background:var(--rose);color:#fff;border-color:var(--rose)}
+.phone{width:270px;aspect-ratio:9/16;border-radius:36px;border:10px solid #1d1719;position:relative;overflow:hidden;margin:auto;background:#000;box-shadow:0 20px 50px #0003}
+.phone video{position:absolute;inset:0;width:100%;height:100%;max-height:none;border-radius:0}
+.ov-top{position:absolute;top:14px;left:12px;right:12px;display:flex;align-items:center;gap:8px;color:#fff;font-size:12px;font-weight:600;text-shadow:0 1px 4px #0008}
+.av{width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,var(--rose),var(--gold));display:flex;align-items:center;justify-content:center;font-family:'Playfair Display'}
+.cap{position:absolute;left:12px;right:12px;bottom:70px;text-align:center;color:#fff;font-weight:600;font-size:17px;text-shadow:0 2px 10px #000a;opacity:0;transform:translateY(10px);transition:.5s}
+.cap.on{opacity:1;transform:none}.cap.luxe{font-family:'Playfair Display';font-style:italic}
+.music{position:absolute;bottom:14px;left:12px;right:12px;color:#fff;font-size:11px;background:#0005;border-radius:20px;padding:6px 10px;backdrop-filter:blur(4px)}
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:12px 20px;border-radius:30px;font-size:14px;display:none;z-index:9}
+.modal{position:fixed;inset:0;background:#2b212599;display:none;align-items:center;justify-content:center;padding:20px;z-index:8}
+.modal div{background:#fff;border-radius:20px;padding:28px;max-width:380px;text-align:center}
+.note{font-size:12px;color:var(--mut);background:#fdf6e9;border-radius:10px;padding:8px 12px;margin-top:12px}
+.banner{background:#fdf0d8;color:#7a5a1e;text-align:center;font-size:13px;padding:8px;display:none}.banner.live{background:#e6f4ea;color:#256c3a}
+.err{color:#b3261e;font-size:13px;margin-top:10px}.dl{color:var(--rose);font-weight:600}
+.stop{background:#fdecea;color:#8c1d18;border-radius:14px;padding:16px;margin-top:14px;font-size:14px}.bd{font-size:13px;margin:4px 0}.bd b{color:var(--rose);font-weight:600;margin-right:6px}details{margin-top:12px}summary{cursor:pointer;font-weight:600;font-size:14px}.two{display:grid;grid-template-columns:1fr 1fr;gap:0 14px}@media(max-width:720px){.two{grid-template-columns:1fr}}
+</style>
+</head><body>
+<header><div class="logo">Salon<i>Reel</i></div><span class="badge" id="badge">…</span></header>
+<div class="banner" id="banner"></div>
+<div class="steps" id="steps"><span>1 Upload</span><span>2 Analyze</span><span>3 Script</span><span>4 Reel</span><span>5 Share</span></div>
+<main>
+<section id="s0"><h2>Show off the finished look</h2><p class="s">Upload a short video of the final hairstyle.</p>
+<div class="drop" id="drop"><div style="font-size:40px">✂️</div><b>Tap to choose a video</b><div style="color:var(--mut);font-size:13px">MP4 / MOV · vertical works best · max 90s used</div>
+<input type="file" id="file" accept="video/*" hidden></div>
+<div id="prev" style="margin-top:16px"></div><div class="err" id="e0"></div>
+<label>Salon name</label><input id="salon" value="Maison Lumière">
+<details open><summary>Salon profile (saved on this device per salon)</summary>
+<div class="two"><div><label>Stylist name</label><input id="stylist" placeholder="e.g. Ava"></div>
+<div><label>City tag</label><input id="city" placeholder="e.g. Brooklyn"></div>
+<div><label>Services</label><input id="services" placeholder="e.g. cuts, balayage, gloss"></div>
+<div><label>Booking text</label><input id="booking" placeholder="e.g. Book via link in bio"></div>
+<div><label>Language</label><select id="language"><option>English</option><option>Spanish</option><option>French</option><option>Vietnamese</option><option>Portuguese</option><option>German</option><option>Italian</option></select></div></div>
+<label>Brand notes</label><textarea id="brandNotes" rows="2" placeholder="Voice, vibe, words to use or avoid"></textarea></details>
+<div class="row" style="margin-top:18px"><button class="btn ghost" id="sampleBtn">Use sample clip</button><button class="btn rose" id="toAnalyze" disabled>Analyze style →</button></div></section>
+
+<section id="s1"><h2>Reading the look…</h2><p class="s" id="stat">Extracting keyframes</p><div class="bar"><div id="bar"></div></div><div class="err" id="e1"></div>
+<div id="res" style="display:none"><div class="kv" id="kv"></div><label>Technique tags</label><div id="tags"></div><label>Standout details</label><div id="stand" style="font-size:14px"></div>
+<label>Clip breakdown</label><div id="bd"></div><div id="stop1"></div>
+<div class="row" style="margin-top:18px"><button class="btn ghost" onclick="go(1)">↻ Re-analyze</button><button class="btn ghost" onclick="go(0)">← Different video</button><button class="btn rose" id="toGen" onclick="go(2)">Write my promo →</button></div></div></section>
+
+<section id="s2"><h2>Your promo copy</h2><p class="s" id="genStat">Pick a tone, then tweak anything.</p>
+<div class="tones row" id="tones"><button data-t="Luxe" class="on">✨ Luxe</button><button data-t="Fun">🎉 Fun</button><button data-t="Minimal">◻ Minimal</button></div>
+<div id="stop2"></div>
+<label>Reel script — one caption per line: <code>start-end | text</code> (seconds)</label><textarea id="script" rows="6"></textarea>
+<label>Instagram caption</label><textarea id="caption" rows="5"></textarea>
+<label>Hashtags</label><textarea id="tagsTxt" rows="2"></textarea><div class="err" id="e2"></div>
+<div class="row" style="margin-top:18px"><button class="btn ghost" id="regen">↻ Regenerate</button><button class="btn rose" id="toReel" onclick="go(3)">Preview Reel →</button></div></section>
+
+<section id="s3"><h2>Reel · 9:16</h2><p class="s">Preview captions are synced to the video timeline; render a real 1080×1920 MP4 with burned-in captions and music.</p>
+<div class="grid"><div class="phone" id="phone"><div class="ov-top"><div class="av" id="av">M</div><span id="sn"></span></div><div class="cap" id="cap"></div><div class="music" id="mus"></div></div>
+<div><label>Music track</label><select id="track"></select>
+<div class="note">Tracks are ffmpeg-synthesized placeholders (royalty-free). Swap in licensed audio in data/music/.</div>
+<div class="row" style="margin-top:18px"><button class="btn" id="renderBtn">🎬 Render MP4</button></div>
+<div id="rstat" style="font-size:13px;margin-top:10px;color:var(--mut)"></div><div class="err" id="e3"></div>
+<div class="row" style="margin-top:18px"><button class="btn ghost" onclick="go(2)">← Edit copy</button><button class="btn rose" id="toIG" disabled>Get my Reel →</button></div></div></div></section>
+
+<section id="s4"><h2>Your Reel is ready</h2><p class="s">Download it, copy the caption, and post it from your phone.</p>
+<a class="btn rose" id="dlBig" download="salonreel.mp4" style="display:block;text-align:center;text-decoration:none;font-size:18px;padding:18px">⬇ Download Reel (MP4)</a>
+<label>Caption &amp; hashtags</label><textarea id="final" rows="8"></textarea>
+<div class="row" style="margin-top:14px"><button class="btn" id="copy">Copy caption &amp; hashtags</button><button class="btn ghost" onclick="location.reload()">Start over</button></div>
+<div class="note">📱 Post it yourself: send the MP4 to your phone, open Instagram → + → Reel, pick the video, paste the caption, and share. The best times to post are usually weekday evenings.</div></section>
+</main>
+<div class="toast" id="toast"></div>
+</main>
+<div class="toast" id="toast"></div>
+<script>
+const $=id=>document.getElementById(id);let C={},vid=null,vurl=null,vdur=15,look=null,tone='Luxe',render=null,syncV=null;
+const api=async(p,body)=>{const r=await fetch(p,body instanceof FormData?{method:'POST',body}:{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body||{})});const j=await r.json();if(!r.ok)throw new Error(j.error||r.statusText);return j};
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const STOP='<div class="stop"><b>No finished haircut detected.</b><br>SalonReel only writes promos for a clearly visible finished cut or style. Upload a clip that shows the result (front, side or back view) and try again.</div>';
+const PF=['stylist','city','services','booking','language','brandNotes'];
+const pkey=()=>'salonreel:profile:'+($('salon').value.trim().toLowerCase()||'default');
+function loadProfile(){let p={};try{p=JSON.parse(localStorage.getItem(pkey())||'{}')}catch(e){}PF.forEach(k=>$(k).value=p[k]||(k=='language'?'English':''))}
+function saveProfile(){const p={};PF.forEach(k=>p[k]=$(k).value);localStorage.setItem(pkey(),JSON.stringify(p));localStorage.setItem('salonreel:last',$('salon').value)}
+function profile(){const p={salon:$('salon').value};PF.forEach(k=>p[k]=$(k).value.trim());return p}
+if(localStorage.getItem('salonreel:last'))$('salon').value=localStorage.getItem('salonreel:last');loadProfile();
+$('salon').onchange=loadProfile;PF.forEach(k=>$(k).addEventListener('input',saveProfile));$('salon').addEventListener('input',()=>localStorage.setItem('salonreel:last',$('salon').value));
+const fmt=l=>`${(+l.start_s).toFixed(1)}-${(+l.end_s).toFixed(1)} | ${l.text}`;
+function parseScript(){return $('script').value.split('\n').map(x=>{const m=x.match(/^\s*([\d.]+)\s*-\s*([\d.]+)\s*\|\s*(.+)$/);return m?{start_s:+m[1],end_s:+m[2],text:m[3].trim()}:null}).filter(Boolean)}
+function go(n){if(n==2&&look&&look.has_haircut===false)n=1;document.querySelectorAll('section').forEach((s,i)=>s.classList.toggle('on',i==n));
+ document.querySelectorAll('#steps span').forEach((s,i)=>s.classList.toggle('on',i<=n));
+ if(n==1)analyze();if(n==2&&!$('script').value)gen();if(n==3)reel();else stopReel();
+ if(n==4){$('dlBig').href='/renders/'+render;$('final').value=$('caption').value+'\n\n'+$('tagsTxt').value}window.scrollTo(0,0)}
+fetch('/api/config').then(r=>r.json()).then(c=>{C=c;const b=$('banner');b.style.display='block';b.className='banner'+(c.llmLive?' live':'');
+ b.textContent=c.llmLive?`AI: live (${c.provider})`:`DEMO MODE — no ${c.provider=='claude'?'ANTHROPIC_API_KEY':'XAI_API_KEY'}: analysis & copy are mock`;
+ $('badge').textContent=c.llmLive?'AI · '+c.provider:'DEMO';$('track').innerHTML=c.tracks.map(t=>`<option value="${t.id}">♪ ${esc(t.label)}</option>`).join('')});
+$('drop').onclick=()=>$('file').click();
+function busy(b,on,txt){b.disabled=on;if(txt)b.textContent=txt}
+$('file').onchange=async e=>{const f=e.target.files[0];if(!f)return;$('e0').textContent='';$('prev').innerHTML='<p class=s>Uploading…</p>';
+ const fd=new FormData();fd.append('video',f);try{setVid(await api('/api/upload',fd))}catch(x){$('e0').textContent=x.message;$('prev').innerHTML=''}};
+$('sampleBtn').onclick=async()=>{try{setVid(await api('/api/sample'))}catch(x){$('e0').textContent=x.message}};
+function setVid(r){vid=r.videoId;vurl=r.url;vdur=Math.min(r.duration||15,90);render=null;look=null;$('prev').replaceChildren(media(true));$('toAnalyze').disabled=false;$('script').value=''}
+function media(ctrl){const v=document.createElement('video');v.src=vurl;v.muted=true;v.loop=true;v.autoplay=true;v.playsInline=true;v.controls=!!ctrl;return v}
+$('toAnalyze').onclick=()=>{saveProfile();go(1)};
+async function analyze(){$('res').style.display='none';$('e1').textContent='';$('stop1').innerHTML='';let p=0;
+ const msgs=['Extracting timestamped keyframes…','Sending frames to '+(C.llmLive?C.provider+' vision':'mock analyzer')+'…','Mapping what is visible over time…'];
+ const t=setInterval(()=>{p=Math.min(92,p+2);$('bar').style.width=p+'%';$('stat').textContent=msgs[Math.min(2,p/31|0)]},150);
+ try{const r=await api('/api/analyze',{videoId:vid});look=r.look;vdur=r.duration||vdur;clearInterval(t);$('bar').style.width='100%';
+  $('stat').textContent=`Analysis complete · ${r.frames} frames · ${r.mode=='live'?'AI: '+r.provider:'demo (mock result)'}`;
+  $('kv').innerHTML=[['Cut / style',look.cut],['Color',look.color],['Length',look.length],['Technique',look.technique]].map(([k,v])=>`<b>${k}</b><span>${esc(v||'—')}</span>`).join('')+`<b>Confidence</b><span>${Math.round((look.confidence||0)*100)}%</span>`;
+  $('tags').innerHTML=(look.tags||[]).map(t=>`<span class=tag>${esc(t)}</span>`).join('')||'—';$('stand').innerHTML=(look.standout||[]).map(esc).join(' · ')||'—';
+  $('bd').innerHTML=(look.clip_breakdown||[]).map(b=>`<div class=bd><b>${b.start_s.toFixed(1)}–${b.end_s.toFixed(1)}s</b>${esc(b.what_is_visible)}</div>`).join('')||'—';
+  const ok=look.has_haircut!==false;$('toGen').style.display=ok?'':'none';$('stop1').innerHTML=ok?'':STOP;
+  $('res').style.display='block';$('script').value=''}catch(x){clearInterval(t);$('e1').textContent=x.message}}
+$('tones').onclick=e=>{const b=e.target.closest('button');if(!b)return;tone=b.dataset.t;[...$('tones').children].forEach(x=>x.classList.toggle('on',x==b));gen()};
+$('regen').onclick=gen;
+async function gen(){$('e2').textContent='';$('stop2').innerHTML='';$('toReel').disabled=false;$('genStat').textContent='Writing copy…';
+ try{const r=await api('/api/generate',{look,tone,profile:profile(),duration:vdur});
+  if(r.error=='no_haircut'){$('stop2').innerHTML=STOP;$('toReel').disabled=true;$('genStat').textContent='';return}
+  $('script').value=(r.script||[]).map(fmt).join('\n');$('caption').value=r.caption||'';$('tagsTxt').value=(r.hashtags||[]).join(' ');render=null;
+  $('genStat').textContent=r.mode=='live'?`Written by ${C.provider} · edit freely`:'Demo template copy · edit freely'}catch(x){$('e2').textContent=x.message;$('genStat').textContent=''}}
+function reel(){const ph=$('phone');ph.querySelectorAll('video').forEach(x=>x.remove());const m=media();ph.prepend(m);m.play().catch(()=>{});
+ const s=$('salon').value;$('sn').textContent=s;$('av').textContent=(s[0]||'S').toUpperCase();$('mus').textContent=$('track').selectedOptions[0]?.text||'';
+ const c=$('cap');c.className='cap'+(tone=='Luxe'?' luxe':'');const lines=parseScript();let cur=null;
+ m.ontimeupdate=()=>{const t=m.currentTime,l=lines.find(l=>t>=l.start_s&&t<l.end_s)||null;if(l!==cur){cur=l;c.classList.remove('on');if(l){c.textContent=l.text;requestAnimationFrame(()=>c.classList.add('on'))}}};
+ syncV=m;$('toIG').disabled=!render}
+function stopReel(){if(syncV)syncV.ontimeupdate=null}
+$('track').onchange=()=>{$('mus').textContent=$('track').selectedOptions[0].text;render=null;$('toIG').disabled=true};
+$('script').oninput=()=>{render=null};
+$('renderBtn').onclick=async()=>{const lines=parseScript();if(!lines.length){$('e3').textContent='No valid script lines (format: start-end | text).';return}
+ const b=$('renderBtn');busy(b,true,'Rendering…');$('e3').textContent='';$('rstat').textContent='ffmpeg is rendering 1080×1920…';
+ try{const r=await api('/api/render',{videoId:vid,lines,salon:$('salon').value,track:$('track').value,tone});render=r.renderId;
+  $('rstat').innerHTML=`Rendered ${r.duration.toFixed(1)}s · ${r.lines.length} timed captions · <a class=dl href="${r.url}" target=_blank>▶ Watch</a>`;$('toIG').disabled=false}
+ catch(x){$('e3').textContent=x.message;$('rstat').textContent=''}busy(b,false,'🎬 Render MP4')};
+$('toIG').onclick=()=>go(4);
+function toast(m){$('toast').textContent=m;$('toast').style.display='block';setTimeout(()=>$('toast').style.display='none',2200)}
+$('copy').onclick=async()=>{try{await navigator.clipboard.writeText($('final').value)}catch(e){$('final').select();document.execCommand('copy')}toast('Caption copied ✓')};
+go(0);
+</script></body></html>

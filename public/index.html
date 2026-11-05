@@ -42,117 +42,103 @@ label{font-size:12px;font-weight:600;color:var(--mut);display:block;margin:12px 
 .banner{background:#fdf0d8;color:#7a5a1e;text-align:center;font-size:13px;padding:8px;display:none}.banner.live{background:#e6f4ea;color:#256c3a}
 .err{color:#b3261e;font-size:13px;margin-top:10px}.dl{color:var(--rose);font-weight:600}
 .stop{background:#fdecea;color:#8c1d18;border-radius:14px;padding:16px;margin-top:14px;font-size:14px}.bd{font-size:13px;margin:4px 0}.bd b{color:var(--rose);font-weight:600;margin-right:6px}details{margin-top:12px}summary{cursor:pointer;font-weight:600;font-size:14px}.two{display:grid;grid-template-columns:1fr 1fr;gap:0 14px}@media(max-width:720px){.two{grid-template-columns:1fr}}
+.shot{border:1px solid var(--line);border-radius:16px;padding:14px;margin:10px 0;background:#fdfbfa}.shot h4{margin:0 0 4px;font-size:15px}.shot .m{font-size:12px;color:var(--mut)}.pill{display:inline-block;font-size:11px;border-radius:20px;padding:3px 9px;margin-left:6px;font-weight:600}.ok{background:#e6f4ea;color:#256c3a}.bad{background:#fdecea;color:#8c1d18}.warn{background:#fdf0d8;color:#7a5a1e}.shot video{max-height:180px;width:auto;margin-top:8px}.nav{display:flex;gap:8px}.nav a{font-size:13px;color:var(--ink);text-decoration:none;font-weight:600}.ovl{display:grid;grid-template-columns:62px 62px 1fr;gap:6px;margin:4px 0}.ovl input{padding:8px}.reel{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);padding:10px 0;font-size:14px;cursor:pointer}.consent{display:flex;gap:10px;align-items:flex-start;background:#fdf6e9;border-radius:12px;padding:14px;margin-top:14px;font-weight:600}.consent input{width:22px;height:22px;flex:none}.prog{font-size:12px;color:var(--mut)}
 </style>
 </head><body>
-<header><div class="logo">Salon<i>Reel</i></div><span class="badge" id="badge">…</span></header>
+<header><div class="logo">Salon<i>Reel</i> <span style="font-size:13px;font-family:Inter;color:var(--mut)">Studio</span></div><div class="nav"><a href="#" id="newBtn">+ New reel</a><a href="#" id="reelsBtn">My Reels</a><span class="badge" id="badge">…</span></div></header>
 <div class="banner" id="banner"></div>
-<div class="steps" id="steps"><span>1 Upload</span><span>2 Analyze</span><span>3 Script</span><span>4 Reel</span><span>5 Share</span></div>
+<div class="steps" id="steps"><span>1 Brief</span><span>2 Shot list</span><span>3 Film</span><span>4 Check</span><span>5 Edit</span><span>6 Export</span></div>
 <main>
-<section id="s0"><h2>Show off the finished look</h2><p class="s">Upload a short video of the final hairstyle.</p>
-<div class="drop" id="drop"><div style="font-size:40px">✂️</div><b>Tap to choose a video</b><div style="color:var(--mut);font-size:13px">MP4 / MOV · vertical works best · max 90s used</div>
-<input type="file" id="file" accept="video/*" hidden></div>
-<div id="prev" style="margin-top:16px"></div><div class="err" id="e0"></div>
+<section id="s0"><h2>Plan a new Reel</h2><p class="s">Tell us the look you want. Grok writes the script and a shot list to film.</p>
 <label>Salon name</label><input id="salon" value="Maison Lumière">
-<details open><summary>Salon profile (saved on this device per salon)</summary>
-<div class="two"><div><label>Stylist name</label><input id="stylist" placeholder="e.g. Ava"></div>
-<div><label>City tag</label><input id="city" placeholder="e.g. Brooklyn"></div>
-<div><label>Services</label><input id="services" placeholder="e.g. cuts, balayage, gloss"></div>
-<div><label>Booking text</label><input id="booking" placeholder="e.g. Book via link in bio"></div>
-<div><label>Language</label><select id="language"><option>English</option><option>Spanish</option><option>French</option><option>Vietnamese</option><option>Portuguese</option><option>German</option><option>Italian</option></select></div></div>
-<label>Brand notes</label><textarea id="brandNotes" rows="2" placeholder="Voice, vibe, words to use or avoid"></textarea></details>
-<div class="row" style="margin-top:18px"><button class="btn ghost" id="sampleBtn">Use sample clip</button><button class="btn rose" id="toAnalyze" disabled>Analyze style →</button></div></section>
+<div class="two"><div><label>Reel style</label><select id="style"></select></div><div><label>Mood</label><select id="mood"></select></div>
+<div><label>Music</label><select id="music"></select></div><div><label>Language</label><select id="language"><option>English</option><option>Spanish</option><option>French</option><option>Vietnamese</option><option>Portuguese</option><option>German</option><option>Italian</option></select></div></div>
+<details><summary>Salon profile (saved on this device per salon)</summary>
+<div class="two"><div><label>Stylist name</label><input id="stylist"></div><div><label>City tag</label><input id="city" placeholder="e.g. Brooklyn"></div>
+<div><label>Services</label><input id="services"></div><div><label>Booking text</label><input id="booking" placeholder="Book via link in bio"></div></div>
+<label>Brand notes</label><textarea id="brandNotes" rows="2"></textarea></details>
+<div class="err" id="e0"></div><div class="row" style="margin-top:18px"><button class="btn rose" id="planBtn">Write script &amp; shot list →</button></div></section>
 
-<section id="s1"><h2>Reading the look…</h2><p class="s" id="stat">Extracting keyframes</p><div class="bar"><div id="bar"></div></div><div class="err" id="e1"></div>
-<div id="res" style="display:none"><div class="kv" id="kv"></div><label>Technique tags</label><div id="tags"></div><label>Standout details</label><div id="stand" style="font-size:14px"></div>
-<label>Clip breakdown</label><div id="bd"></div><div id="stop1"></div>
-<div class="row" style="margin-top:18px"><button class="btn ghost" onclick="go(1)">↻ Re-analyze</button><button class="btn ghost" onclick="go(0)">← Different video</button><button class="btn rose" id="toGen" onclick="go(2)">Write my promo →</button></div></div></section>
+<section id="s1"><h2>Your shot list</h2><p class="s" id="concept"></p><div id="shots"></div><label>Draft script</label><div id="draft" style="font-size:14px"></div>
+<div class="row" style="margin-top:18px"><button class="btn ghost" onclick="go(0)">← Change brief</button><button class="btn rose" onclick="go(2)">Start filming →</button></div></section>
 
-<section id="s2"><h2>Your promo copy</h2><p class="s" id="genStat">Pick a tone, then tweak anything.</p>
-<div class="tones row" id="tones"><button data-t="Luxe" class="on">✨ Luxe</button><button data-t="Fun">🎉 Fun</button><button data-t="Minimal">◻ Minimal</button></div>
-<div id="stop2"></div>
-<label>Reel script — one caption per line: <code>start-end | text</code> (seconds)</label><textarea id="script" rows="6"></textarea>
-<label>Instagram caption</label><textarea id="caption" rows="5"></textarea>
-<label>Hashtags</label><textarea id="tagsTxt" rows="2"></textarea><div class="err" id="e2"></div>
-<div class="row" style="margin-top:18px"><button class="btn ghost" id="regen">↻ Regenerate</button><button class="btn rose" id="toReel" onclick="go(3)">Preview Reel →</button></div></section>
+<section id="s2"><h2>Film each shot</h2><p class="s">Tap a shot to open your camera (vertical). Or upload one video of the whole appointment and Grok will split it.</p>
+<div id="slots"></div>
+<details style="margin-top:16px"><summary>Upload one video instead</summary><p class="s" style="margin-top:8px">Grok samples about 1 frame per second and matches parts of the video to each shot.</p>
+<input type="file" accept="video/*" id="fullFile"><div class="prog" id="fullProg"></div></details>
+<div class="err" id="e2"></div><div class="row" style="margin-top:18px"><button class="btn ghost" onclick="go(1)">← Shot list</button><button class="btn rose" id="qcBtn">Check my clips →</button></div></section>
 
-<section id="s3"><h2>Reel · 9:16</h2><p class="s">Preview captions are synced to the video timeline; render a real 1080×1920 MP4 with burned-in captions and music.</p>
-<div class="grid"><div class="phone" id="phone"><div class="ov-top"><div class="av" id="av">M</div><span id="sn"></span></div><div class="cap" id="cap"></div><div class="music" id="mus"></div></div>
-<div><label>Music track</label><select id="track"></select>
-<div class="note">Tracks are ffmpeg-synthesized placeholders (royalty-free). Swap in licensed audio in data/music/.</div>
-<div class="row" style="margin-top:18px"><button class="btn" id="renderBtn">🎬 Render MP4</button></div>
-<div id="rstat" style="font-size:13px;margin-top:10px;color:var(--mut)"></div><div class="err" id="e3"></div>
-<div class="row" style="margin-top:18px"><button class="btn ghost" onclick="go(2)">← Edit copy</button><button class="btn rose" id="toIG" disabled>Get my Reel →</button></div></div></div></section>
+<section id="s3"><h2>Quality check</h2><p class="s" id="qcStat"></p><div id="qc"></div><div id="gaps"></div><div class="err" id="e3"></div>
+<div class="row" style="margin-top:18px"><button class="btn ghost" onclick="go(2)">← Reshoot / add clips</button><button class="btn rose" id="editBtn">Edit my Reel →</button></div></section>
 
-<section id="s4"><h2>Your Reel is ready</h2><p class="s">Download it, copy the caption, and post it from your phone.</p>
-<a class="btn rose" id="dlBig" download="salonreel.mp4" style="display:block;text-align:center;text-decoration:none;font-size:18px;padding:18px">⬇ Download Reel (MP4)</a>
-<label>Caption &amp; hashtags</label><textarea id="final" rows="8"></textarea>
-<div class="row" style="margin-top:14px"><button class="btn" id="copy">Copy caption &amp; hashtags</button><button class="btn ghost" onclick="location.reload()">Start over</button></div>
-<div class="note">📱 Post it yourself: send the MP4 to your phone, open Instagram → + → Reel, pick the video, paste the caption, and share. The best times to post are usually weekday evenings.</div></section>
-</main>
-<div class="toast" id="toast"></div>
-</main>
-<div class="toast" id="toast"></div>
+<section id="s4"><h2>Editing…</h2><p class="s" id="edStat">Grok is planning cuts, speed, zooms and transitions on the beat, then writing your captions. Rendering takes a minute.</p><div class="bar"><div id="bar"></div></div><div class="err" id="e4"></div></section>
+
+<section id="s5"><h2>Review &amp; export</h2><div class="grid"><div><div class="phone" style="border-width:8px"><video id="prevV" controls playsinline controlsList="nodownload" style="position:absolute;inset:0;width:100%;height:100%;max-height:none;border-radius:0;object-fit:cover"></video></div><p class="prog" id="planSum" style="text-align:center"></p></div>
+<div><label>On-screen text (start s · end s · text)</label><div id="ovls"></div><button class="btn ghost" id="rerBtn" style="margin-top:8px">↻ Re-render with edits</button><div class="prog" id="rerStat"></div>
+<label>Caption</label><textarea id="caption" rows="6"></textarea><label>Hashtags</label><textarea id="tags" rows="2"></textarea>
+<label class="consent"><input type="checkbox" id="consent"><span id="consentTxt">The client agreed to be featured online.</span></label>
+<div class="row" style="margin-top:14px"><button class="btn rose" id="expBtn" disabled>⬇ Export MP4</button><button class="btn ghost" id="copyBtn">Copy caption &amp; hashtags</button></div>
+<div class="err" id="e5"></div><div class="note">📱 Post it yourself: open Instagram → + → Reel, pick the downloaded video, paste the caption.</div></div></div></section>
+
+<section id="s6"><h2>My Reels</h2><div id="reels"></div></section>
+</main><div class="toast" id="toast"></div>
 <script>
-const $=id=>document.getElementById(id);let C={},vid=null,vurl=null,vdur=15,look=null,tone='Luxe',render=null,syncV=null;
-const api=async(p,body)=>{const r=await fetch(p,body instanceof FormData?{method:'POST',body}:{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body||{})});const j=await r.json();if(!r.ok)throw new Error(j.error||r.statusText);return j};
-const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const STOP='<div class="stop"><b>No finished haircut detected.</b><br>SalonReel only writes promos for a clearly visible finished cut or style. Upload a clip that shows the result (front, side or back view) and try again.</div>';
-const PF=['stylist','city','services','booking','language','brandNotes'];
-const pkey=()=>'salonreel:profile:'+($('salon').value.trim().toLowerCase()||'default');
-function loadProfile(){let p={};try{p=JSON.parse(localStorage.getItem(pkey())||'{}')}catch(e){}PF.forEach(k=>$(k).value=p[k]||(k=='language'?'English':''))}
-function saveProfile(){const p={};PF.forEach(k=>p[k]=$(k).value);localStorage.setItem(pkey(),JSON.stringify(p));localStorage.setItem('salonreel:last',$('salon').value)}
-function profile(){const p={salon:$('salon').value};PF.forEach(k=>p[k]=$(k).value.trim());return p}
-if(localStorage.getItem('salonreel:last'))$('salon').value=localStorage.getItem('salonreel:last');loadProfile();
-$('salon').onchange=loadProfile;PF.forEach(k=>$(k).addEventListener('input',saveProfile));$('salon').addEventListener('input',()=>localStorage.setItem('salonreel:last',$('salon').value));
-const fmt=l=>`${(+l.start_s).toFixed(1)}-${(+l.end_s).toFixed(1)} | ${l.text}`;
-function parseScript(){return $('script').value.split('\n').map(x=>{const m=x.match(/^\s*([\d.]+)\s*-\s*([\d.]+)\s*\|\s*(.+)$/);return m?{start_s:+m[1],end_s:+m[2],text:m[3].trim()}:null}).filter(Boolean)}
-function go(n){if(n==2&&look&&look.has_haircut===false)n=1;document.querySelectorAll('section').forEach((s,i)=>s.classList.toggle('on',i==n));
- document.querySelectorAll('#steps span').forEach((s,i)=>s.classList.toggle('on',i<=n));
- if(n==1)analyze();if(n==2&&!$('script').value)gen();if(n==3)reel();else stopReel();
- if(n==4){$('dlBig').href='/renders/'+render;$('final').value=$('caption').value+'\n\n'+$('tagsTxt').value}window.scrollTo(0,0)}
-fetch('/api/config').then(r=>r.json()).then(c=>{C=c;const b=$('banner');b.style.display='block';b.className='banner'+(c.llmLive?' live':'');
- b.textContent=c.llmLive?`AI: live (${c.provider})`:`DEMO MODE — no ${c.provider=='claude'?'ANTHROPIC_API_KEY':'XAI_API_KEY'}: analysis & copy are mock`;
- $('badge').textContent=c.llmLive?'AI · '+c.provider:'DEMO';$('track').innerHTML=c.tracks.map(t=>`<option value="${t.id}">♪ ${esc(t.label)}</option>`).join('')});
-$('drop').onclick=()=>$('file').click();
-function busy(b,on,txt){b.disabled=on;if(txt)b.textContent=txt}
-$('file').onchange=async e=>{const f=e.target.files[0];if(!f)return;$('e0').textContent='';$('prev').innerHTML='<p class=s>Uploading…</p>';
- const fd=new FormData();fd.append('video',f);try{setVid(await api('/api/upload',fd))}catch(x){$('e0').textContent=x.message;$('prev').innerHTML=''}};
-$('sampleBtn').onclick=async()=>{try{setVid(await api('/api/sample'))}catch(x){$('e0').textContent=x.message}};
-function setVid(r){vid=r.videoId;vurl=r.url;vdur=Math.min(r.duration||15,90);render=null;look=null;$('prev').replaceChildren(media(true));$('toAnalyze').disabled=false;$('script').value=''}
-function media(ctrl){const v=document.createElement('video');v.src=vurl;v.muted=true;v.loop=true;v.autoplay=true;v.playsInline=true;v.controls=!!ctrl;return v}
-$('toAnalyze').onclick=()=>{saveProfile();go(1)};
-async function analyze(){$('res').style.display='none';$('e1').textContent='';$('stop1').innerHTML='';let p=0;
- const msgs=['Extracting timestamped keyframes…','Sending frames to '+(C.llmLive?C.provider+' vision':'mock analyzer')+'…','Mapping what is visible over time…'];
- const t=setInterval(()=>{p=Math.min(92,p+2);$('bar').style.width=p+'%';$('stat').textContent=msgs[Math.min(2,p/31|0)]},150);
- try{const r=await api('/api/analyze',{videoId:vid});look=r.look;vdur=r.duration||vdur;clearInterval(t);$('bar').style.width='100%';
-  $('stat').textContent=`Analysis complete · ${r.frames} frames · ${r.mode=='live'?'AI: '+r.provider:'demo (mock result)'}`;
-  $('kv').innerHTML=[['Cut / style',look.cut],['Color',look.color],['Length',look.length],['Technique',look.technique]].map(([k,v])=>`<b>${k}</b><span>${esc(v||'—')}</span>`).join('')+`<b>Confidence</b><span>${Math.round((look.confidence||0)*100)}%</span>`;
-  $('tags').innerHTML=(look.tags||[]).map(t=>`<span class=tag>${esc(t)}</span>`).join('')||'—';$('stand').innerHTML=(look.standout||[]).map(esc).join(' · ')||'—';
-  $('bd').innerHTML=(look.clip_breakdown||[]).map(b=>`<div class=bd><b>${b.start_s.toFixed(1)}–${b.end_s.toFixed(1)}s</b>${esc(b.what_is_visible)}</div>`).join('')||'—';
-  const ok=look.has_haircut!==false;$('toGen').style.display=ok?'':'none';$('stop1').innerHTML=ok?'':STOP;
-  $('res').style.display='block';$('script').value=''}catch(x){clearInterval(t);$('e1').textContent=x.message}}
-$('tones').onclick=e=>{const b=e.target.closest('button');if(!b)return;tone=b.dataset.t;[...$('tones').children].forEach(x=>x.classList.toggle('on',x==b));gen()};
-$('regen').onclick=gen;
-async function gen(){$('e2').textContent='';$('stop2').innerHTML='';$('toReel').disabled=false;$('genStat').textContent='Writing copy…';
- try{const r=await api('/api/generate',{look,tone,profile:profile(),duration:vdur});
-  if(r.error=='no_haircut'){$('stop2').innerHTML=STOP;$('toReel').disabled=true;$('genStat').textContent='';return}
-  $('script').value=(r.script||[]).map(fmt).join('\n');$('caption').value=r.caption||'';$('tagsTxt').value=(r.hashtags||[]).join(' ');render=null;
-  $('genStat').textContent=r.mode=='live'?`Written by ${C.provider} · edit freely`:'Demo template copy · edit freely'}catch(x){$('e2').textContent=x.message;$('genStat').textContent=''}}
-function reel(){const ph=$('phone');ph.querySelectorAll('video').forEach(x=>x.remove());const m=media();ph.prepend(m);m.play().catch(()=>{});
- const s=$('salon').value;$('sn').textContent=s;$('av').textContent=(s[0]||'S').toUpperCase();$('mus').textContent=$('track').selectedOptions[0]?.text||'';
- const c=$('cap');c.className='cap'+(tone=='Luxe'?' luxe':'');const lines=parseScript();let cur=null;
- m.ontimeupdate=()=>{const t=m.currentTime,l=lines.find(l=>t>=l.start_s&&t<l.end_s)||null;if(l!==cur){cur=l;c.classList.remove('on');if(l){c.textContent=l.text;requestAnimationFrame(()=>c.classList.add('on'))}}};
- syncV=m;$('toIG').disabled=!render}
-function stopReel(){if(syncV)syncV.ontimeupdate=null}
-$('track').onchange=()=>{$('mus').textContent=$('track').selectedOptions[0].text;render=null;$('toIG').disabled=true};
-$('script').oninput=()=>{render=null};
-$('renderBtn').onclick=async()=>{const lines=parseScript();if(!lines.length){$('e3').textContent='No valid script lines (format: start-end | text).';return}
- const b=$('renderBtn');busy(b,true,'Rendering…');$('e3').textContent='';$('rstat').textContent='ffmpeg is rendering 1080×1920…';
- try{const r=await api('/api/render',{videoId:vid,lines,salon:$('salon').value,track:$('track').value,tone});render=r.renderId;
-  $('rstat').innerHTML=`Rendered ${r.duration.toFixed(1)}s · ${r.lines.length} timed captions · <a class=dl href="${r.url}" target=_blank>▶ Watch</a>`;$('toIG').disabled=false}
- catch(x){$('e3').textContent=x.message;$('rstat').textContent=''}busy(b,false,'🎬 Render MP4')};
-$('toIG').onclick=()=>go(4);
+const $=id=>document.getElementById(id);let C={},P=null;
+const api=async(p,body,m)=>{const r=await fetch(p,body===undefined&&!m?{}:{method:m||'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body||{})});const j=await r.json().catch(()=>({error:r.statusText}));if(!r.ok)throw new Error(j.error||r.statusText);return j};
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 function toast(m){$('toast').textContent=m;$('toast').style.display='block';setTimeout(()=>$('toast').style.display='none',2200)}
-$('copy').onclick=async()=>{try{await navigator.clipboard.writeText($('final').value)}catch(e){$('final').select();document.execCommand('copy')}toast('Caption copied ✓')};
+function go(n){document.querySelectorAll('section').forEach((s,i)=>s.classList.toggle('on',i==n));document.querySelectorAll('#steps span').forEach((s,i)=>s.classList.toggle('on',i<=n&&n<6));
+ $('steps').style.display=n==6?'none':'';if(n==1)drawShots();if(n==2)drawSlots();if(n==3)drawQC();if(n==5)drawReview();if(n==6)drawReels();window.scrollTo(0,0)}
+// profile persistence
+const PF=['stylist','city','services','booking','language','brandNotes','style','mood','music'];
+const pk=()=>'salonreel:profile:'+($('salon').value.trim().toLowerCase()||'default');
+function loadProfile(){let p={};try{p=JSON.parse(localStorage.getItem(pk())||'{}')}catch(e){}PF.forEach(k=>{if(p[k]!=null)$(k).value=p[k]})}
+function saveProfile(){const p={};PF.forEach(k=>p[k]=$(k).value);localStorage.setItem(pk(),JSON.stringify(p));localStorage.setItem('salonreel:last',$('salon').value)}
+api('/api/studio/config').then(c=>{C=c;$('style').innerHTML=c.styles.map(s=>`<option>${s}</option>`).join('');$('mood').innerHTML=c.moods.map(s=>`<option>${s}</option>`).join('');
+ $('music').innerHTML=c.tracks.map(t=>`<option value="${t.id}">${esc(t.label)}</option>`).join('');$('consentTxt').textContent=c.consent;
+ if(localStorage.getItem('salonreel:last'))$('salon').value=localStorage.getItem('salonreel:last');loadProfile();
+ const b=$('banner');b.style.display='block';b.className='banner'+(c.llmLive?' live':'');b.textContent=(c.llmLive?`AI: live (${c.provider})`:'DEMO MODE — no AI key: plans, checks and copy are mock')+' · storage: '+(c.storage=='r2'?'Cloudflare R2':'local disk');
+ $('badge').textContent=c.llmLive?'AI · '+c.provider:'DEMO';const id=location.hash.slice(1);if(/^[a-z0-9]{12}$/.test(id))openProject(id)});
+$('salon').onchange=loadProfile;PF.forEach(k=>$(k).addEventListener('change',saveProfile));
+const profile=()=>({salon:$('salon').value.trim(),stylist:$('stylist').value.trim(),city:$('city').value.trim(),services:$('services').value.trim(),booking:$('booking').value.trim(),language:$('language').value,brandNotes:$('brandNotes').value.trim()});
+async function busyRun(btn,label,fn,errEl){const t=btn.textContent;btn.disabled=true;btn.textContent=label;$(errEl).textContent='';try{await fn()}catch(x){$(errEl).textContent=x.message}btn.disabled=false;btn.textContent=t}
+$('planBtn').onclick=()=>busyRun($('planBtn'),'Planning with '+(C.llmLive?'Grok':'demo')+'…',async()=>{saveProfile();P=await api('/api/projects',{profile:profile(),style:$('style').value,mood:$('mood').value,music:$('music').value});location.hash=P.id;go(1)},'e0');
+async function openProject(id){P=await api('/api/projects/'+id);location.hash=id;go(P.render?5:P.qc?3:Object.keys(P.clips||{}).length?2:1)}
+function drawShots(){$('concept').textContent=(P.plan.mode=='demo'?'[demo] ':'')+P.plan.concept;
+ $('shots').innerHTML=P.plan.shots.map((s,i)=>`<div class=shot><h4>${i+1}. ${esc(s.name)} <span class="pill warn">${s.type} · ${s.target_s}s</span></h4><div class=m>📷 ${esc(s.framing)}</div><div class=m>💡 ${esc(s.tips)}</div></div>`).join('');
+ $('draft').innerHTML=P.plan.draft_script.map(l=>`<div class=bd>• ${esc(l)}</div>`).join('')}
+function drawSlots(){$('slots').innerHTML=P.plan.shots.map((s,i)=>{const c=P.clipsView?.[s.id];return `<div class=shot><h4>${i+1}. ${esc(s.name)} <span class="pill ${c?'ok':'warn'}">${c?(c.auto_split?'auto-split ':'')+c.duration.toFixed(1)+'s':'aim '+s.target_s+'s'}</span></h4><div class=m>📷 ${esc(s.framing)} · 💡 ${esc(s.tips)}</div>
+ ${c?`<video src="${c.url}#t=${c.src_start},${c.src_end}" muted playsinline controls></video>`:''}
+ <div class=row style="margin-top:8px"><label class="btn ghost" style="margin:0;text-transform:none;letter-spacing:0;color:var(--ink);font-size:13px">🎥 ${c?'Reshoot':'Film'}<input type=file accept="video/*" capture="environment" hidden data-slot="${s.id}"></label>
+ <label class="btn ghost" style="margin:0;text-transform:none;letter-spacing:0;color:var(--ink);font-size:13px">📁 From library<input type=file accept="video/*" hidden data-slot="${s.id}"></label><span class=prog id="pg_${s.id}"></span></div></div>`}).join('');
+ $('slots').querySelectorAll('input[type=file]').forEach(inp=>inp.onchange=e=>upload(inp.dataset.slot,e.target.files[0],$('pg_'+inp.dataset.slot)))}
+function putFile(url,headers,file,onp){return new Promise((res,rej)=>{const x=new XMLHttpRequest();x.open('PUT',url);Object.entries(headers||{}).forEach(([k,v])=>x.setRequestHeader(k,v));
+ x.upload.onprogress=e=>e.lengthComputable&&onp(Math.round(e.loaded/e.total*100));x.onload=()=>x.status<300?res():rej(new Error('Upload failed ('+x.status+')'));x.onerror=()=>rej(new Error('Upload blocked (network/CORS)'));x.send(file)})}
+async function upload(slot,file,pg){if(!file)return;$('e2').textContent='';try{const ext=(file.name.split('.').pop()||'mp4').toLowerCase();
+ const u=await api(`/api/projects/${P.id}/upload-url`,{slot,contentType:file.type||'video/mp4',ext});pg.textContent='Uploading 0%';
+ await putFile(u.url,u.headers,file,p=>pg.textContent='Uploading '+p+'%');pg.textContent=slot=='full'?'Splitting with Grok…':'Processing…';
+ P=await api(`/api/projects/${P.id}/clips`,{slot,key:u.key});pg.textContent='';drawSlots();if(slot=='full')toast(`Split into ${Object.keys(P.clips).length} shots`)}catch(x){pg.textContent='';$('e2').textContent=x.message}}
+$('fullFile').onchange=e=>upload('full',e.target.files[0],$('fullProg'));
+$('qcBtn').onclick=()=>busyRun($('qcBtn'),'Checking clips…',async()=>{P=await api(`/api/projects/${P.id}/qc`,{});go(3)},'e2');
+function drawQC(){if(!P.qc)return;$('qcStat').textContent=(P.qc.mode=='demo'?'[demo] ':'')+P.qc.overall;
+ $('qc').innerHTML=P.qc.clips.map(c=>{const s=P.plan.shots.find(x=>x.id==c.shot_id);return `<div class=shot><h4>${esc(s?.name)} <span class="pill ${c.reshoot?'bad':c.issues.length?'warn':'ok'}">${c.reshoot?'Reshoot':c.issues.length?'Check':'Good'}</span></h4>
+ <div class=m>${esc(c.what_is_visible)}</div><div class=m>Matches slot: ${c.matches_slot?'yes':'no'} · Lighting: ${c.lighting} · ${c.steadiness} · ${c.metrics.duration}s (aim ${s?.target_s}s)</div>${c.issues.map(i=>`<div class=m>⚠ ${esc(i)}</div>`).join('')}</div>`}).join('');
+ const g=P.gaps;$('gaps').innerHTML=`<div class="${g.ready?'note':'stop'}"><b>Gap report:</b> ${g.missing.length?'Missing: '+g.missing.map(m=>esc(m.name)).join(', ')+'. ':''}${g.reshoot.length?'Reshoot: '+g.reshoot.map(m=>esc(m.name)).join(', ')+'. ':''}${g.ready?(g.missing.length||g.reshoot.length?'You can still edit with what you have.':'All shots look good.'):esc(g.note)}</div>`;
+ $('editBtn').textContent=g.ready?'Edit my Reel →':'Edit anyway →'}
+$('editBtn').onclick=async()=>{go(4);$('e4').textContent='';let p=0;const t=setInterval(()=>{p=Math.min(95,p+1);$('bar').style.width=p+'%'},900);
+ try{P=await api(`/api/projects/${P.id}/edit`,{force:true});clearInterval(t);go(5)}catch(x){clearInterval(t);$('e4').innerHTML=x.message=='no_haircut'?'<div class=stop><b>No finished haircut detected.</b> Reshoot the reveal so the finished cut is clearly visible.</div><button class="btn ghost" onclick="go(2)">← Back to filming</button>':esc(x.message)}};
+function drawReview(){const e=P.edit;$('prevV').src=P.previewUrl;$('planSum').textContent=`${e.total}s · ${e.segments.length} clips · ${e.segments.map(s=>s.transition_in.type).slice(1).join(', ')} · ${e.track}`+(e.mode=='demo'?' · demo plan':'');
+ $('ovls').innerHTML=e.overlays.map((o,i)=>`<div class=ovl><input type=number step=0.1 value="${o.start_s}" data-i=${i} data-k=start_s><input type=number step=0.1 value="${o.end_s}" data-i=${i} data-k=end_s><input value="${esc(o.text)}" data-i=${i} data-k=text maxlength=60></div>`).join('');
+ $('caption').value=P.copy.caption;$('tags').value=P.copy.hashtags.join(' ');$('consent').checked=false;$('expBtn').disabled=true}
+$('consent').onchange=()=>$('expBtn').disabled=!$('consent').checked;
+const overlays=()=>{const o=P.edit.overlays.map(x=>({...x}));$('ovls').querySelectorAll('input').forEach(i=>o[i.dataset.i][i.dataset.k]=i.dataset.k=='text'?i.value:+i.value);return o};
+$('rerBtn').onclick=()=>busyRun($('rerBtn'),'Rendering…',async()=>{P=await api(`/api/projects/${P.id}/rerender`,{overlays:overlays(),caption:$('caption').value,hashtags:$('tags').value.split(/\s+/)});drawReview();toast('Re-rendered ✓')},'e5');
+$('expBtn').onclick=()=>busyRun($('expBtn'),'Preparing…',async()=>{if(!$('consent').checked)throw new Error('Please confirm client consent first.');
+ const r=await api(`/api/projects/${P.id}/export`,{consent:true,caption:$('caption').value});const a=document.createElement('a');a.href=r.download;a.download='salonreel.mp4';document.body.appendChild(a);a.click();a.remove();toast('Export ready ✓')},'e5');
+$('copyBtn').onclick=async()=>{const t=$('caption').value+'\n\n'+$('tags').value;try{await navigator.clipboard.writeText(t)}catch(e){}toast('Caption copied ✓')};
+async function drawReels(){$('reels').innerHTML='<p class=s>Loading…</p>';try{const r=await api('/api/projects');$('reels').innerHTML=r.length?r.map(p=>`<div class=reel data-id="${p.id}"><span><b>${esc(p.salon||'Untitled')}</b> · ${esc(p.style||'')}<br><span class=prog>${new Date(p.updated).toLocaleString()} · ${esc((p.concept||'').slice(0,80))}</span></span><span class="pill ${p.exported?'ok':'warn'}">${p.status}</span></div>`).join(''):'<p class=s>No reels yet.</p>';
+ $('reels').querySelectorAll('.reel').forEach(d=>d.onclick=()=>openProject(d.dataset.id))}catch(x){$('reels').innerHTML=esc(x.message)}}
+$('reelsBtn').onclick=e=>{e.preventDefault();go(6)};$('newBtn').onclick=e=>{e.preventDefault();P=null;location.hash='';go(0)};
+document.querySelectorAll('#steps span').forEach((s,i)=>s.onclick=()=>{if(!P)return;if(i==1||i==2||(i==3&&P.qc)||(i==5&&P.render))go(i)});
 go(0);
 </script></body></html>

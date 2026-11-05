@@ -43,3 +43,13 @@ Music tracks are **placeholders synthesized by ffmpeg** (`data/music/*.m4a`), so
 - **Script** (`/api/generate`): sends the prompt in `prompts/script_prompt.txt`, the salon profile (brand notes, stylist, services, booking text, city, language), and fixed rules: return `{"error":"no_haircut"}` when there is no haircut, no emoji in script lines, and timed lines that don't overlap. The server checks the output, clamps the times, and strips emoji.
 - **Render**: burns in each caption at its own `start_s`–`end_s`.
 - The salon profile is saved in the browser's localStorage, one profile per salon name.
+
+## Studio pipeline (`/`, the old one-video flow is at `/quick.html`)
+1. **Brief:** style, mood and music, plus the saved salon profile. `POST /api/projects` has Grok write a concept, a 4–6 shot list (type, framing, tip, target length) and a draft script.
+2. **Film:** one upload slot per shot (`<input capture>` opens the phone camera). The browser PUTs straight to a presigned R2 URL from `POST /api/projects/:id/upload-url`, then registers the clip with `POST /api/projects/:id/clips`. Alternatively, upload one video (`slot=full`) and Grok splits it into the planned shots from frames sampled at about 1fps.
+3. **Check:** `POST /api/projects/:id/qc` measures brightness and motion with ffmpeg signalstats and checks length and orientation. Grok vision checks each clip against its slot, and the result is a gap report of missing shots and shots to reshoot.
+4. **Edit:** `POST /api/projects/:id/edit` has Grok produce an edit plan JSON (order, trims, speed and ramps, punch-in or push-in zooms, transitions, music start). The server validates it, clamps it, limits it to 30s and snaps cuts to the music's beat grid. Tung's script prompt then writes the timed overlays from the timeline's clip breakdown.
+5. **Render:** each segment is rendered at 1080×1920 (trim, speed, zoom), then joined with xfade transitions, ASS captions and music. The output goes to `projects/{id}/renders/`.
+6. **Review & export:** edit the overlay text or timings and re-render. Export requires the consent checkbox; the server records the consent in project.json and returns a presigned download.
+
+Storage layout: `projects/{id}/project.json`, `projects/{id}/raw/*`, `projects/{id}/renders/*`. "My Reels" lists the projects (`GET /api/projects`). At startup the server tries to set the bucket's CORS rules so browser uploads work, and logs the result.
