@@ -1,0 +1,67 @@
+2026-11-05T00:51:15Z INF Thank you for trying Cloudflare Tunnel. Doing so, without a Cloudflare account, is a quick way to experiment and try it out. However, be aware that these account-less Tunnels have no uptime guarantee, are subject to the Cloudflare Online Services Terms of Use (https://www.cloudflare.com/website-terms/), and Cloudflare reserves the right to investigate your use of Tunnels for violations of such terms. If you intend to use Tunnels in production you should use a pre-created named tunnel by following: https://developers.cloudflare.com/cloudflare-one/connections/connect-apps
+2026-11-05T00:51:15Z INF Requesting new quick Tunnel on trycloudflare.com...
+2026-11-05T00:51:18Z INF +--------------------------------------------------------------------------------------------+
+2026-11-05T00:51:18Z INF |  Your quick Tunnel has been created! Visit it at (it may take some time to be reachable):  |
+2026-11-05T00:51:18Z INF |  https://journey-absolutely-marketing-true.trycloudflare.com                               |
+2026-11-05T00:51:18Z INF +--------------------------------------------------------------------------------------------+
+2026-11-05T00:51:18Z INF Cannot determine default configuration path. No file [config.yml config.yaml] in [~/.cloudflared ~/.cloudflare-warp ~/cloudflare-warp /etc/cloudflared /usr/local/etc/cloudflared]
+2026-11-05T00:51:18Z INF Version 2026.10.7 (Checksum 1f99fb518b83dec2ba8d870a7cc991d82a77e6196295a3d2754ba17ab9f91872)
+2026-11-05T00:51:18Z INF GOOS: linux, GOVersion: go1.27.3, GoArch: amd64
+2026-11-05T00:51:18Z INF Settings: map[ha-connections:1 protocol:quic url:http://localhost:3000]
+2026-11-05T00:51:18Z INF Environmental variables map[SAND_EGRESS_TUNNEL_ENABLED:1 SAND_EGRESS_TUNNEL_PROXY_ADDR:127.0.0.1:8791 SAND_EGRESS_TUNNEL_WS_ADDR:0.0.0.0:8790 SAND_EGRESS_TUNNEL_WS_PORT:8790]
+2026-11-05T00:51:18Z INF Autoupdate frequency is set autoupdateFreq=86400000
+2026-11-05T00:51:18Z ERR Failed to fetch features, default to disable error="lookup cfd-features.argotunnel.com on 10.0.0.2:53: no such host"
+2026-11-05T00:51:18Z INF Generated Connector ID: bf4f074d-7ae7-4581-8e16-b11b7fc0fade
+2026-11-05T00:51:18Z INF Initial protocol quic
+2026-11-05T00:51:18Z INF ICMP proxy will use 172.30.0.2 as source for IPv4
+2026-11-05T00:51:18Z INF ICMP proxy will use fe80::802b:38ff:fe3d:bcd0 in zone enp0s3 as source for IPv6
+2026-11-05T00:51:18Z WRN The user running cloudflared process has a GID (group ID) that is not within ping_group_range. You might need to add that user to a group within that range, or instead update the range to encompass a group the user is already in by modifying /proc/sys/net/ipv4/ping_group_range. Otherwise cloudflared will not be able to ping this network error="Group ID 1000 is not between ping group 1 to 0"
+2026-11-05T00:51:18Z WRN ICMP proxy feature is disabled error="cannot create ICMPv4 proxy: Group ID 1000 is not between ping group 1 to 0 nor ICMPv6 proxy: socket: permission denied"
+2026/11/04 19:51:18 failed to sufficiently increase receive buffer size (was: 208 kiB, wanted: 7168 kiB, got: 416 kiB). See https://github.com/quic-go/quic-go/wiki/UDP-Buffer-Sizes for details.
+2026-11-05T00:51:18Z INF ICMP proxy will use 172.30.0.2 as source for IPv4
+2026-11-05T00:51:18Z INF ICMP proxy will use fe80::802b:38ff:fe3d:bcd0 in zone enp0s3 as source for IPv6
+2026-11-05T00:51:18Z INF Starting metrics server on 127.0.0.1:20241/metrics
+2026-11-05T00:51:18Z INF Tunnel connection curve preferences: [X25519MLKEM768 CurveID(65074) CurveP256] connIndex=0 event=0 ip=198.18.0.1
+2026-11-05T00:51:23Z ERR Failed to dial a quic connection error="failed to dial to edge with quic: timeout: no recent network activity" connIndex=0 event=0 ip=198.18.0.1
+2026-11-05T00:51:23Z INF Retrying connection in up to 2s connIndex=0 event=0 ip=198.18.0.1
+2026-11-05T00:51:23Z INF Tunnel connection curve preferences: [X25519MLKEM768 CurveID(65074) CurveP256] connIndex=0 event=0 ip=198.18.0.1
+2026-11-05T00:51:28Z INF +----------------------------------------------------------------------------------------------------+
+2026-11-05T00:51:28Z INF |                                      CONNECTIVITY PRE-CHECKS                                       |
+2026-11-05T00:51:28Z INF +----------------------------------------------------------------------------------------------------+
+2026-11-05T00:51:28Z INF |  COMPONENT         TARGET                     STATUS  DETAILS                                      |
+2026-11-05T00:51:28Z INF |  DNS Resolution    region1.v2.argotunnel.com  PASS    DNS Resolved successfully                    |
+2026-11-05T00:51:28Z INF |  DNS Resolution    region2.v2.argotunnel.com  PASS    DNS Resolved successfully                    |
+2026-11-05T00:51:28Z INF |  UDP Connectivity  region1.v2.argotunnel.com  FAIL    QUIC connection failed                       |
+2026-11-05T00:51:28Z INF |  UDP Connectivity  region2.v2.argotunnel.com  FAIL    QUIC connection failed                       |
+2026-11-05T00:51:28Z INF |  TCP Connectivity  region1.v2.argotunnel.com  FAIL    HTTP/2 connection is blocked or unreachable  |
+2026-11-05T00:51:28Z INF |  TCP Connectivity  region2.v2.argotunnel.com  FAIL    HTTP/2 connection is blocked or unreachable  |
+2026-11-05T00:51:28Z INF |  Cloudflare API    api.cloudflare.com:443     PASS    API is reachable                             |
+2026-11-05T00:51:28Z INF |  ERROR: Allow outbound QUIC traffic on port 7844 or use HTTP2.                                     |
+2026-11-05T00:51:28Z INF |  ERROR: Allow outbound QUIC traffic on port 7844 or use HTTP2.                                     |
+2026-11-05T00:51:28Z INF |  ERROR: Allow outbound TCP on port 7844.                                                           |
+2026-11-05T00:51:28Z INF |  ERROR: Allow outbound TCP on port 7844.                                                           |
+2026-11-05T00:51:28Z INF |                                                                                                    |
+2026-11-05T00:51:28Z INF |  SUMMARY: Environment has critical failures. cloudflared may not be able to establish a tunnel.    |
+2026-11-05T00:51:28Z INF +----------------------------------------------------------------------------------------------------+
+2026-11-05T00:51:28Z INF precheck component="DNS Resolution" details="DNS Resolved successfully" run_id=d14e307c-df1a-4766-a7df-f98139bd969c status=pass target=region1.v2.argotunnel.com
+2026-11-05T00:51:28Z INF precheck component="DNS Resolution" details="DNS Resolved successfully" run_id=d14e307c-df1a-4766-a7df-f98139bd969c status=pass target=region2.v2.argotunnel.com
+2026-11-05T00:51:28Z INF precheck component="UDP Connectivity" details="QUIC connection failed" run_id=d14e307c-df1a-4766-a7df-f98139bd969c status=fail target=region1.v2.argotunnel.com
+2026-11-05T00:51:28Z INF precheck component="UDP Connectivity" details="QUIC connection failed" run_id=d14e307c-df1a-4766-a7df-f98139bd969c status=fail target=region2.v2.argotunnel.com
+2026-11-05T00:51:28Z INF precheck component="TCP Connectivity" details="HTTP/2 connection is blocked or unreachable" run_id=d14e307c-df1a-4766-a7df-f98139bd969c status=fail target=region1.v2.argotunnel.com
+2026-11-05T00:51:28Z INF precheck component="TCP Connectivity" details="HTTP/2 connection is blocked or unreachable" run_id=d14e307c-df1a-4766-a7df-f98139bd969c status=fail target=region2.v2.argotunnel.com
+2026-11-05T00:51:28Z INF precheck component="Cloudflare API" details="API is reachable" run_id=d14e307c-df1a-4766-a7df-f98139bd969c status=pass target=api.cloudflare.com:443
+2026-11-05T00:51:28Z INF precheck complete hard_fail=true run_id=d14e307c-df1a-4766-a7df-f98139bd969c
+2026-11-05T00:51:28Z ERR Failed to dial a quic connection error="failed to dial to edge with quic: timeout: no recent network activity" connIndex=0 event=0 ip=198.18.0.1
+2026-11-05T00:51:28Z INF Retrying connection in up to 4s connIndex=0 event=0 ip=198.18.0.1
+2026-11-05T00:51:29Z INF Tunnel connection curve preferences: [X25519MLKEM768 CurveID(65074) CurveP256] connIndex=0 event=0 ip=198.18.0.1
+2026-11-05T00:51:34Z ERR Failed to dial a quic connection error="failed to dial to edge with quic: timeout: no recent network activity" connIndex=0 event=0 ip=198.18.0.1
+2026-11-05T00:51:34Z INF Retrying connection in up to 8s connIndex=0 event=0 ip=198.18.0.1
+2026-11-05T00:51:36Z INF Tunnel connection curve preferences: [X25519MLKEM768 CurveID(65074) CurveP256] connIndex=0 event=0 ip=198.18.0.1
+2026-11-05T00:51:41Z ERR Failed to dial a quic connection error="failed to dial to edge with quic: timeout: no recent network activity" connIndex=0 event=0 ip=198.18.0.1
+2026-11-05T00:51:41Z INF Retrying connection in up to 16s connIndex=0 event=0 ip=198.18.0.1
+2026-11-05T00:51:52Z INF Tunnel connection curve preferences: [X25519MLKEM768 CurveID(65074) CurveP256] connIndex=0 event=0 ip=198.18.0.1
+2026-11-05T00:51:57Z ERR Failed to dial a quic connection error="failed to dial to edge with quic: timeout: no recent network activity" connIndex=0 event=0 ip=198.18.0.1
+2026-11-05T00:51:57Z INF Retrying connection in up to 32s connIndex=0 event=0 ip=198.18.0.1
+2026-11-05T00:52:13Z INF Initiating graceful shutdown due to signal terminated ...
+2026-11-05T00:52:13Z INF Tunnel server stopped
+2026-11-05T00:52:13Z INF Metrics server stopped

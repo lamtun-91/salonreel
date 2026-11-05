@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: salonreel
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/config
+    envVars:
+      - key: LLM_PROVIDER
+        value: grok
+      - key: PUBLIC_BASE_URL
+        value: https://salonreel.onrender.com   # update if Render assigns a different subdomain
+      - key: XAI_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: IG_ACCESS_TOKEN
+        sync: false
+      - key: IG_USER_ID
+        sync: false
