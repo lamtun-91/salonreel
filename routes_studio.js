@@ -1,6 +1,6 @@
 // Studio API: projects stored in R2 (or local disk) under projects/{id}/
 const fs = require('fs'), path = require('path'), crypto = require('crypto');
-const st = require('./storage'), S = require('./studio'), P = require('./pipeline');
+const st = require('./storage'), S = require('./studio'), P = require('./pipeline'), SS = require('./shotstack');
 const CONSENT = 'The client agreed to be featured online.';
 
 module.exports = ({ app, llm, parseJSON, run, probe, cfg, TRACKS, D, id, wrap }) => {
@@ -40,8 +40,8 @@ module.exports = ({ app, llm, parseJSON, run, probe, cfg, TRACKS, D, id, wrap })
     await new Promise((res, rej) => q.pipe(fs.createWriteStream(f)).on('finish', res).on('error', rej)); s.json({ ok: true }); }));
   app.get('/api/local/get', wrap(async (q, s) => { const k = st.verifyLocal(q.query, 'get'); if (q.query.dl) s.attachment(q.query.dl); s.sendFile(st.lp(k)); }));
 
-  app.get('/api/studio/config', (q, s) => s.json({ storage: st.R2 ? 'r2' : 'local', llmLive: live(), provider: cfg().provider, styles: S.STYLES, moods: S.MOODS,
-    tracks: Object.entries(TRACKS).map(([k, v]) => ({ id: k, label: v.label, bpm: S.TRACK_BPM[k] })), consent: CONSENT }));
+  app.get('/api/studio/config', (q, s) => { const rp = SS.resolveProvider(); s.json({ storage: st.R2 ? 'r2' : 'local', llmLive: live(), provider: cfg().provider, renderProvider: rp.provider, renderProviderReason: rp.reason, styles: S.STYLES, moods: S.MOODS,
+    tracks: Object.entries(TRACKS).map(([k, v]) => ({ id: k, label: v.label, bpm: S.TRACK_BPM[k] })), consent: CONSENT }); });
 
   // My Reels
   app.get('/api/projects', wrap(async (q, s) => {
@@ -115,7 +115,25 @@ module.exports = ({ app, llm, parseJSON, run, probe, cfg, TRACKS, D, id, wrap })
   }));
 
   // 4. edit plan + script (Tung's prompt) -> 5. render
-  async function renderProject(p) {
+  async function absoluteUrl(u) {
+    if (!u) return null;
+    if (/^https?:\/\//i.test(u)) return u;
+    const base = (process.env.PUBLIC_BASE_URL || '').replace(/\/$/, '');
+    if (!base) throw new Error('PUBLIC_BASE_URL is required so Shotstack can fetch local media');
+    return base + (u.startsWith('/') ? u : '/' + u);
+  }
+  async function mediaUrl(key) {
+    return absoluteUrl(await st.presignGet(key));
+  }
+  async function ensureMusicUrl(p, track) {
+    if (!TRACKS[track]?.expr) return null;
+    const local = D('music', track + '_60.m4a');
+    if (!fs.existsSync(local)) throw new Error('music file missing for track ' + track);
+    const key = `projects/${p.id}/music/${track}_60.m4a`;
+    if (!(await st.exists(key))) await st.putFile(key, local, 'audio/mp4');
+    return mediaUrl(key);
+  }
+  async function renderWithFfmpeg(p) {
     const e = p.edit, dir = cache(p.id), segFiles = [];
     for (const [i, sg] of e.segments.entries()) {
       const c = p.clips[sg.shot_id], src = await local(p, c.key);
@@ -151,8 +169,88 @@ module.exports = ({ app, llm, parseJSON, run, probe, cfg, TRACKS, D, id, wrap })
     args.push('-filter_complex_threads', '1', '-filter_complex', fc.join(';'), '-map', '[vout]', '-map', '[aout]', '-t', total.toFixed(3), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '21', '-pix_fmt', 'yuv420p', '-threads', '1', '-x264-params', 'rc-lookahead=4:sync-lookahead=0:bframes=1', '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', out);
     await run('ffmpeg', args); if (acc.includes('acc_')) fs.unlinkSync(acc);
     const key = `projects/${p.id}/renders/${path.basename(out)}`; await st.putFile(key, out, 'video/mp4'); fs.unlinkSync(out);
-    p.render = { key, at: new Date().toISOString(), duration: Math.round(total * 100) / 100 }; delete p.consent; delete p.export;
+    p.render = { key, at: new Date().toISOString(), duration: Math.round(total * 100) / 100, provider: 'ffmpeg' }; delete p.consent; delete p.export;
   }
+  async function renderWithShotstack(p) {
+    const e = p.edit;
+    const clipUrls = {};
+    for (const sg of e.segments) {
+      const c = p.clips[sg.shot_id];
+      if (!c?.key) throw new Error('missing clip key for ' + sg.shot_id);
+      clipUrls[sg.shot_id] = await mediaUrl(c.key);
+    }
+    const musicUrl = await ensureMusicUrl(p, e.track);
+    const { edit: payload, meta } = SS.buildEditPayload({ edit: e, clips: p.clips, clipUrls, musicUrl, profile: p.profile || {} });
+    const client = SS.createClient();
+    // Resume polling an in-flight Shotstack job instead of re-submitting (avoids duplicate renders).
+    let renderId = p.render?.provider === 'shotstack' && p.render?.status && p.render.status !== 'done' && p.render.status !== 'failed'
+      ? p.render.renderId : null;
+    if (!renderId) {
+      const submitted = await client.submit(payload);
+      renderId = submitted.id;
+      p.render = {
+        provider: 'shotstack', renderId, status: 'queued', at: new Date().toISOString(),
+        duration: meta.total, approximations: meta.approximations, env: client.version,
+      };
+      await save(p);
+    } else {
+      p.render = { ...p.render, status: 'polling', approximations: meta.approximations, env: client.version };
+      await save(p);
+    }
+    const done = await client.waitForRender(renderId, {
+      onTick: async (stt) => {
+        p.render = { ...p.render, status: stt.status, renderId, updated: new Date().toISOString() };
+        if (stt.error) p.render.error = String(stt.error).slice(0, 500);
+        await save(p).catch(() => {});
+      },
+    });
+    const dir = cache(p.id);
+    const out = path.join(dir, `shotstack_${renderId}.mp4`);
+    await client.downloadToFile(done.url, out);
+    let duration = meta.total;
+    try { duration = (await probe(out)).duration || meta.total; } catch {}
+    duration = Math.round(duration * 100) / 100;
+    const key = `projects/${p.id}/renders/${path.basename(out)}`;
+    await st.putFile(key, out, 'video/mp4');
+    try { fs.unlinkSync(out); } catch {}
+    p.render = {
+      key, at: new Date().toISOString(), duration,
+      provider: 'shotstack', renderId, status: 'done', env: client.version,
+      approximations: meta.approximations, url: done.url,
+    };
+    delete p.consent; delete p.export;
+  }
+  async function renderProject(p) {
+    const choice = SS.resolveProvider();
+    p.renderMeta = { choice: choice.provider, reason: choice.reason, at: new Date().toISOString() };
+    if (choice.provider === 'shotstack') {
+      try {
+        await renderWithShotstack(p);
+        return;
+      } catch (err) {
+        const msg = err?.message || String(err);
+        console.error('shotstack render failed', msg);
+        p.render = {
+          ...(p.render || {}),
+          provider: 'shotstack',
+          status: 'failed',
+          error: msg.slice(0, 800),
+          at: new Date().toISOString(),
+        };
+        await save(p).catch(() => {});
+        if (SS.strictMode()) throw err;
+        console.error('falling back to ffmpeg renderer');
+        p.renderMeta.fallback = 'ffmpeg';
+        p.renderMeta.fallbackError = msg.slice(0, 800);
+        await renderWithFfmpeg(p);
+        p.render.fallbackFrom = 'shotstack';
+        p.render.fallbackError = msg.slice(0, 500);
+        return;
+      }
+    }
+    await renderWithFfmpeg(p);
+  }
+
   app.post('/api/projects/:id/edit', job('edit', async q => {
     const p = await load(q.params.id);
     if (!p.gaps?.ready && !q.body.force) throw new Error('Fix the gap report first (missing/reshoot shots), or continue anyway');
