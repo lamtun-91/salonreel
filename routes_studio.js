@@ -15,10 +15,15 @@ module.exports = ({ app, llm, parseJSON, run, probe, cfg, TRACKS, D, id, wrap })
     const pid = q.params.id; await load(pid);
     if (jobs[pid]?.state === 'running') return s.status(409).json({ error: 'Another step is still running', job: jobs[pid] });
     const j = jobs[pid] = { name, state: 'running', started: Date.now() };
-    s.status(202).json({ job: j });
-    fn(q).then(() => { j.state = 'done'; }).catch(e => { console.error(name, e); j.state = 'error'; j.error = e.message; }).finally(() => { j.ms = Date.now() - j.started; });
+    s.status(202).json({ job: j }); st.putJSON(`projects/${pid}/job.json`, j).catch(() => {});
+    fn(q).then(() => { j.state = 'done'; }).catch(e => { console.error(name, e); j.state = 'error'; j.error = e.message; }).finally(() => { j.ms = Date.now() - j.started; st.putJSON(`projects/${pid}/job.json`, j).catch(() => {}); });
   });
-  app.get('/api/projects/:id/job', (q, s) => s.json(jobs[q.params.id] || { state: 'idle' }));
+  app.get('/api/projects/:id/job', wrap(async (q, s) => {
+    if (jobs[q.params.id]) return s.json(jobs[q.params.id]); await load(q.params.id);
+    const j = await st.getJSON(`projects/${q.params.id}/job.json`).catch(() => null);
+    if (j?.state === 'running') return s.json({ ...j, state: 'error', error: 'The server restarted during this step (free plan). Please try again.' });
+    s.json(j || { state: 'idle' });
+  }));
   async function local(p, key) { // download raw clip once into cache
     const f = path.join(cache(p.id), key.split('/').pop()); if (!fs.existsSync(f)) await st.getFile(key, f); return f; }
   async function frameAt(src, t, out, w = 448) { await run('ffmpeg', ['-y', '-ss', Math.max(0, t).toFixed(2), '-i', src, '-frames:v', '1', '-vf', `scale=${w}:-2`, '-q:v', '6', out]); return fs.existsSync(out) ? fs.readFileSync(out).toString('base64') : null; }
@@ -115,28 +120,36 @@ module.exports = ({ app, llm, parseJSON, run, probe, cfg, TRACKS, D, id, wrap })
     for (const [i, sg] of e.segments.entries()) {
       const c = p.clips[sg.shot_id], src = await local(p, c.key);
       const h = crypto.createHash('md5').update(JSON.stringify([c.key, c.src_start, sg])).digest('hex').slice(0, 10), out = path.join(dir, `seg_${h}.mp4`);
-      if (!fs.existsSync(out)) await run('ffmpeg', ['-y', '-ss', (c.src_start + sg.in_s).toFixed(3), '-t', (sg.out_s - sg.in_s).toFixed(3), '-i', src, '-filter_complex', S.segFilter(sg), '-map', '[v]', '-an', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '19', '-threads', '2', out]);
+      if (!fs.existsSync(out)) await run('ffmpeg', ['-y', '-ss', (c.src_start + sg.in_s).toFixed(3), '-t', (sg.out_s - sg.in_s).toFixed(3), '-i', src, '-filter_complex', S.segFilter(sg), '-map', '[v]', '-an', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '17', '-threads', '1', out]);
       segFiles.push({ f: out, d: (await probe(out)).duration });
     }
-    // xfade chain using actual segment durations
-    const args = ['-y']; segFiles.forEach(x => args.push('-i', x.f));
-    const music = TRACKS[e.track]?.expr ? D('music', e.track + '_60.m4a') : null;
-    let fc = [], last = '[0:v]', t = segFiles[0].d;
-    for (let i = 1; i < segFiles.length; i++) {
-      const tr = e.segments[i].transition_in, d = tr.type === 'cut' ? 0.04 : Math.min(tr.duration, segFiles[i].d * 0.4, segFiles[i - 1].d * 0.4);
-      const off = Math.max(0, t - d); fc.push(`${last}[${i}:v]xfade=transition=${tr.type === 'cut' ? 'fade' : tr.type}:duration=${d.toFixed(3)}:offset=${off.toFixed(3)}[x${i}]`);
-      last = `[x${i}]`; t = off + segFiles[i].d;
+    // transitions rendered as short pieces (tail+head), then concat: tiny memory footprint on 512MB instances
+    const enc = ['-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '17', '-pix_fmt', 'yuv420p', '-r', '30', '-video_track_timescale', '15360', '-threads', '1'];
+    const ds = segFiles.map((x, i) => { if (!i) return 0; const tr = e.segments[i].transition_in; return tr.type === 'cut' ? 0 : Math.min(tr.duration, x.d * 0.4, segFiles[i - 1].d * 0.4); });
+    const pieces = [], tmp = []; let t = 0;
+    const cut = async (src, ss, dur, extra = []) => { const o = path.join(dir, `pc_${tmp.length}.mp4`); tmp.push(o); await run('ffmpeg', ['-y', '-threads', '1', '-ss', ss.toFixed(3), '-t', dur.toFixed(3), '-i', src, ...extra, '-an', ...enc, o]); return o; };
+    for (let i = 0; i < segFiles.length; i++) {
+      const x = segFiles[i], din = ds[i], dout = ds[i + 1] || 0;
+      if (din > 0) { const o = path.join(dir, `pc_${tmp.length}.mp4`); tmp.push(o);
+        await run('ffmpeg', ['-y', '-threads', '1', '-ss', (segFiles[i - 1].d - din).toFixed(3), '-t', din.toFixed(3), '-i', segFiles[i - 1].f, '-threads', '1', '-t', din.toFixed(3), '-i', x.f, '-filter_complex', `[0:v]setpts=PTS-STARTPTS,fps=30[a];[1:v]setpts=PTS-STARTPTS,fps=30[b];[a][b]xfade=transition=${e.segments[i].transition_in.type}:duration=${din.toFixed(3)}:offset=0[v]`, '-map', '[v]', '-an', ...enc, o]);
+        pieces.push(o); t += din; }
+      const body = x.d - din - dout; if (body > 0.05) { pieces.push(await cut(x.f, din, body)); t += body; }
     }
+    const list = path.join(dir, 'concat.txt'); fs.writeFileSync(list, pieces.map(f => `file '${f.replace(/'/g, "'\\''")}'`).join('\n'));
+    const acc = path.join(dir, 'acc.mp4'); await run('ffmpeg', ['-y', '-f', 'concat', '-safe', '0', '-i', list, '-c', 'copy', acc]);
+    tmp.forEach(f => fs.unlinkSync(f)); t = (await probe(acc)).duration || t;
+    const args = ['-y', '-threads', '1', '-i', acc], fc = [], last = '[0:v]';
+    const music = TRACKS[e.track]?.expr ? D('music', e.track + '_60.m4a') : null;
     const total = t, ass = path.join(dir, 'cap.ass');
     const lines = P.cleanSegments(e.overlays || [], total, 'text');
     fs.writeFileSync(ass, P.buildAss({ lines, salon: p.profile.salon || '', duration: total, tone: String(p.inputs.mood).toLowerCase() }));
     fc.push(`${last}subtitles='${S.ffEsc(ass)}':fontsdir=/usr/share/fonts/truetype/dejavu,format=yuv420p[vout]`);
-    const ai = segFiles.length;
+    const ai = 1;
     if (music) { args.push('-ss', String(e.music_start_s || 0), '-i', music); fc.push(`[${ai}:a]atrim=0:${total.toFixed(3)},afade=t=out:st=${Math.max(0, total - 1).toFixed(3)}:d=1[aout]`); }
     else { args.push('-f', 'lavfi', '-t', total.toFixed(3), '-i', 'anullsrc=r=44100:cl=stereo'); fc.push(`[${ai}:a]anull[aout]`); }
     const out = path.join(dir, `render_${Date.now().toString(36)}.mp4`);
-    args.push('-filter_complex', fc.join(';'), '-map', '[vout]', '-map', '[aout]', '-t', total.toFixed(3), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '21', '-pix_fmt', 'yuv420p', '-threads', '2', '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', out);
-    await run('ffmpeg', args);
+    args.push('-filter_complex_threads', '1', '-filter_complex', fc.join(';'), '-map', '[vout]', '-map', '[aout]', '-t', total.toFixed(3), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '21', '-pix_fmt', 'yuv420p', '-threads', '1', '-x264-params', 'rc-lookahead=4:sync-lookahead=0:bframes=1', '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', out);
+    await run('ffmpeg', args); if (acc.includes('acc_')) fs.unlinkSync(acc);
     const key = `projects/${p.id}/renders/${path.basename(out)}`; await st.putFile(key, out, 'video/mp4'); fs.unlinkSync(out);
     p.render = { key, at: new Date().toISOString(), duration: Math.round(total * 100) / 100 }; delete p.consent; delete p.export;
   }
