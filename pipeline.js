@@ -31,29 +31,25 @@ function cleanLook(look, duration) {
 
 // ---- copy ----
 const copySystem = 'You write Instagram Reels copy for hair salons. Reply with JSON only.';
+function cityTag(c) {
+  c = String(c || '').trim(); if (!c) return 'none provided';
+  return c.startsWith('#') ? c : '#' + c.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\p{L}\p{N}]/gu, '') + 'Hair';
+}
 function copyPrompt({ look, tone, profile, duration }) {
-  const p = profile || {};
-  return `${scriptPrompt()}
+  const p = profile || {}, d = duration.toFixed(1), none = v => String(v || '').trim() || 'none provided';
+  const vars = {
+    salon_name: none(p.salon), tone: String(tone || 'luxe').toLowerCase(), brand_notes: none(p.brandNotes),
+    stylist_name: none(p.stylist), services: none(p.services), booking_cta: String(p.booking || '').trim() || 'Book via link in bio',
+    city_tag: cityTag(p.city), language: String(p.language || '').trim() || 'English',
+    clip_breakdown: JSON.stringify((look.clip_breakdown || []).map(({ start_s, end_s, what_is_visible }) => ({ start_s, end_s, what_is_visible }))),
+  };
+  const filled = scriptPrompt().replace(/\{(\w+)\}/g, (m, k) => k in vars ? vars[k] : m);
+  return `${filled}
 
-INPUTS
-Salon: ${p.salon || 'the salon'}
-Tone: ${tone} (luxe = elegant, understated luxury; fun = playful; minimal = terse, clean)
-Language: ${p.language || 'English'}
-Brand notes: ${p.brandNotes || '-'}
-Stylist: ${p.stylist || '-'}
-Services: ${p.services || '-'}
-Booking text: ${p.booking || 'Book via link in bio'}
-City tag: ${p.city || '-'}
-Clip duration: ${duration.toFixed(1)}s
-Look analysis: ${JSON.stringify({ ...look, clip_breakdown: undefined })}
-Clip breakdown: ${JSON.stringify(look.clip_breakdown || [])}
-
-RULES
-- If the analysis shows no haircut (has_haircut false), return exactly {"error":"no_haircut"}.
-- Script lines: no emoji. The caption may use emoji only if the tone suits it.
-- Every script line needs start_s and end_s within 0..${duration.toFixed(1)}, in order, non-overlapping, each at least 1.0s long.
-- Write everything in ${p.language || 'English'}.
-Return JSON: {"script":[{"start_s":number,"end_s":number,"text":string}],"caption":string (under 1500 chars),"hashtags":[8-15 hashtags with #]}`;
+ADDITIONAL RULES
+- Clip duration: ${d}s. Every script line's start_s and end_s must be within 0..${d}, in order, non-overlapping, each at least 1.0s long.
+- Script lines: no emoji (emoji in the caption only as the voice allows).
+- If the clip breakdown shows no finished haircut, return exactly {"error":"no_haircut"}.`;
 }
 function cleanSegments(segs, duration, key) {
   if (!Array.isArray(segs)) return [];
