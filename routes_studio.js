@@ -117,9 +117,11 @@ module.exports = ({ app, llm, parseJSON, run, probe, cfg, TRACKS, D, id, wrap })
   // 4. edit plan + script (Tung's prompt) -> 5. render
   async function absoluteUrl(u) {
     if (!u) return null;
-    if (/^https?:\/\//i.test(u)) return u;
+    if (/^https:\/\//i.test(u)) return u;
+    if (/^http:\/\//i.test(u)) throw new Error('Shotstack media URLs must be https (got http)');
     const base = (process.env.PUBLIC_BASE_URL || '').replace(/\/$/, '');
     if (!base) throw new Error('PUBLIC_BASE_URL is required so Shotstack can fetch local media');
+    if (!/^https:\/\//i.test(base)) throw new Error('PUBLIC_BASE_URL must be https for Shotstack media fetch');
     return base + (u.startsWith('/') ? u : '/' + u);
   }
   async function mediaUrl(key) {

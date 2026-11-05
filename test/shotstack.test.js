@@ -167,14 +167,21 @@ describe('buildEditPayload', () => {
     assert.ok(meta.approximations.length >= 1);
   });
 
-  it('rejects non-http media urls', () => {
+  it('rejects non-https media urls', () => {
     assert.throws(() => SS.buildEditPayload({
       edit: fixtureEdit(),
       clips: fixtureClips(),
       clipUrls: { ...fixtureUrls(), s1: '/api/local/get?x=1' },
       musicUrl: null,
       profile: {},
-    }), /public http/);
+    }), /public https/);
+    assert.throws(() => SS.buildEditPayload({
+      edit: fixtureEdit(),
+      clips: fixtureClips(),
+      clipUrls: { ...fixtureUrls(), s1: 'http://cdn.example.com/s1.mp4' },
+      musicUrl: null,
+      profile: {},
+    }), /public https/);
   });
 
   it('works without music track', () => {

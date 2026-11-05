@@ -104,7 +104,7 @@ function buildEditPayload({ edit, clips, clipUrls, musicUrl, profile = {} }) {
     const c = clips[sg.shot_id];
     if (!c) throw new Error(`missing clip for shot ${sg.shot_id}`);
     const src = clipUrls[sg.shot_id];
-    if (!src || !/^https?:\/\//i.test(src)) throw new Error(`clip URL for ${sg.shot_id} must be a public http(s) URL`);
+    if (!src || !/^https:\/\//i.test(src)) throw new Error(`clip URL for ${sg.shot_id} must be a public https URL`);
 
     const srcStart = (+c.src_start || 0) + (+sg.in_s || 0);
     const srcLen = Math.max(0.05, (+sg.out_s || 0) - (+sg.in_s || 0));
@@ -198,7 +198,7 @@ function buildEditPayload({ edit, clips, clipUrls, musicUrl, profile = {} }) {
   tracks.push({ clips: videoClips });
 
   if (musicUrl) {
-    if (!/^https?:\/\//i.test(musicUrl)) throw new Error('music URL must be a public http(s) URL');
+    if (!/^https:\/\//i.test(musicUrl)) throw new Error('music URL must be a public https URL');
     tracks.push({
       clips: [{
         asset: {
