@@ -9,6 +9,16 @@ module.exports = ({ app, llm, parseJSON, run, probe, cfg, TRACKS, D, id, wrap })
   const load = async pid => { if (!/^[a-z0-9]{12}$/.test(pid)) throw new Error('bad project id'); return st.getJSON(pkey(pid)); };
   const save = async p => { p.updated = new Date().toISOString(); await st.putJSON(pkey(p.id), p); return p; };
   const live = () => cfg().llmLive;
+  // long steps run as background jobs (proxies drop requests > ~100s); client polls /job
+  const jobs = {};
+  const job = (name, fn) => wrap(async (q, s) => {
+    const pid = q.params.id; await load(pid);
+    if (jobs[pid]?.state === 'running') return s.status(409).json({ error: 'Another step is still running', job: jobs[pid] });
+    const j = jobs[pid] = { name, state: 'running', started: Date.now() };
+    s.status(202).json({ job: j });
+    fn(q).then(() => { j.state = 'done'; }).catch(e => { console.error(name, e); j.state = 'error'; j.error = e.message; }).finally(() => { j.ms = Date.now() - j.started; });
+  });
+  app.get('/api/projects/:id/job', (q, s) => s.json(jobs[q.params.id] || { state: 'idle' }));
   async function local(p, key) { // download raw clip once into cache
     const f = path.join(cache(p.id), key.split('/').pop()); if (!fs.existsSync(f)) await st.getFile(key, f); return f; }
   async function frameAt(src, t, out, w = 448) { await run('ffmpeg', ['-y', '-ss', Math.max(0, t).toFixed(2), '-i', src, '-frames:v', '1', '-vf', `scale=${w}:-2`, '-q:v', '6', out]); return fs.existsSync(out) ? fs.readFileSync(out).toString('base64') : null; }
@@ -55,11 +65,12 @@ module.exports = ({ app, llm, parseJSON, run, probe, cfg, TRACKS, D, id, wrap })
     const key = `projects/${p.id}/raw/${slot}_${Date.now().toString(36)}.${ext}`;
     s.json({ key, ...(await st.presignPut(key, ct)) });
   }));
-  app.post('/api/projects/:id/clips', wrap(async (q, s) => {
+  app.post('/api/projects/:id/clips', job('clips', async q => {
     const p = await load(q.params.id), { slot, key } = q.body;
     if (!String(key).startsWith(`projects/${p.id}/raw/`) || !(await st.exists(key))) throw new Error('upload not found');
     const f = await local(p, key), m = await probe(f);
     const dims = JSON.parse(await run('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height:stream_side_data=rotation', '-of', 'json', f])).streams[0] || {};
+    if (!dims.width || !(m.duration > 0.5)) throw new Error('That file has no playable video (or is under 0.5s). Please re-record this shot.');
     let [w, h] = [dims.width, dims.height]; if (Math.abs(dims.side_data_list?.[0]?.rotation || 0) === 90) [w, h] = [h, w];
     if (slot === 'full') {
       p.source = { mode: 'single', key, duration: m.duration }; p.clips = {};
@@ -76,12 +87,12 @@ module.exports = ({ app, llm, parseJSON, run, probe, cfg, TRACKS, D, id, wrap })
       p.source = { mode: 'slots' };
       p.clips[slot] = { key, src_start: 0, src_end: m.duration, duration: m.duration, width: w, height: h };
     }
-    delete p.qc; delete p.edit; delete p.render; delete p.consent; delete p.export; p.status = 'filming';
-    s.json(await view(await save(p)));
+    delete p.qc; delete p.edit; delete p.render; delete p.consent; delete p.export; delete p.gaps; p.status = 'filming';
+    await save(p);
   }));
 
   // 3. QC + gap report
-  app.post('/api/projects/:id/qc', wrap(async (q, s) => {
+  app.post('/api/projects/:id/qc', job('qc', async q => {
     const p = await load(q.params.id), items = [], metricsBy = {}, images = []; let fn = 1;
     for (const shot of p.plan.shots) { const clip = p.clips[shot.id]; if (!clip) continue;
       const f = await local(p, clip.key), a = clip.src_start, b = clip.src_end;
@@ -95,7 +106,7 @@ module.exports = ({ app, llm, parseJSON, run, probe, cfg, TRACKS, D, id, wrap })
     p.qc.mode = live() ? 'live' : 'demo'; p.gaps = S.gapReport(p.plan.shots, p.clips, p.qc);
     if (!p.qc.has_haircut) p.gaps.ready = false, p.gaps.note = 'No finished haircut detected in the reveal — reshoot the reveal.';
     p.status = p.gaps.ready ? 'ready_to_edit' : 'needs_reshoot';
-    s.json(await view(await save(p)));
+    await save(p);
   }));
 
   // 4. edit plan + script (Tung's prompt) -> 5. render
@@ -129,7 +140,7 @@ module.exports = ({ app, llm, parseJSON, run, probe, cfg, TRACKS, D, id, wrap })
     const key = `projects/${p.id}/renders/${path.basename(out)}`; await st.putFile(key, out, 'video/mp4'); fs.unlinkSync(out);
     p.render = { key, at: new Date().toISOString(), duration: Math.round(total * 100) / 100 }; delete p.consent; delete p.export;
   }
-  app.post('/api/projects/:id/edit', wrap(async (q, s) => {
+  app.post('/api/projects/:id/edit', job('edit', async q => {
     const p = await load(q.params.id);
     if (!p.gaps?.ready && !q.body.force) throw new Error('Fix the gap report first (missing/reshoot shots), or continue anyway');
     const ctx = { shots: p.plan.shots, clips: p.clips, qc: p.qc, mood: p.inputs.mood, music: p.inputs.music, style: p.inputs.style };
@@ -140,17 +151,17 @@ module.exports = ({ app, llm, parseJSON, run, probe, cfg, TRACKS, D, id, wrap })
     if (!look.has_haircut) copy = { error: 'no_haircut' };
     else if (live()) copy = P.cleanCopy(parseJSON(await llm({ system: P.copySystem, text: P.copyPrompt({ look, tone: p.inputs.mood, profile: prof, duration: p.edit.total }) })), p.edit.total);
     else copy = P.cleanCopy(P.mockCopy({ ...look, cut: 'Fresh cut', color: 'Signature color', tags: [] }, String(p.inputs.mood).toLowerCase(), prof, p.edit.total), p.edit.total);
-    if (copy.error) { p.status = 'needs_reshoot'; await save(p); return s.status(422).json({ error: 'no_haircut' }); }
+    if (copy.error) { p.status = 'needs_reshoot'; await save(p); throw new Error('no_haircut'); }
     p.edit.overlays = copy.script; p.copy = { caption: copy.caption, hashtags: copy.hashtags };
     await renderProject(p); p.status = 'review';
-    s.json(await view(await save(p)));
+    await save(p);
   }));
-  app.post('/api/projects/:id/rerender', wrap(async (q, s) => {
+  app.post('/api/projects/:id/rerender', job('rerender', async q => {
     const p = await load(q.params.id); if (!p.edit) throw new Error('No edit plan yet');
     if (Array.isArray(q.body.overlays)) p.edit.overlays = P.cleanSegments(q.body.overlays.map(o => ({ ...o, text: P.noEmoji(o.text) })), p.edit.total, 'text');
     if (q.body.caption != null) p.copy.caption = String(q.body.caption).slice(0, 2200);
     if (q.body.hashtags) p.copy.hashtags = P.cleanCopy({ script: [], hashtags: q.body.hashtags }, 1).hashtags;
-    await renderProject(p); s.json(await view(await save(p)));
+    await renderProject(p); await save(p);
   }));
   // 6. export (consent required)
   app.post('/api/projects/:id/export', wrap(async (q, s) => {

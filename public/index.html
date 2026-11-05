@@ -84,7 +84,7 @@ label{font-size:12px;font-weight:600;color:var(--mut);display:block;margin:12px 
 </main><div class="toast" id="toast"></div>
 <script>
 const $=id=>document.getElementById(id);let C={},P=null;
-const api=async(p,body,m)=>{const r=await fetch(p,body===undefined&&!m?{}:{method:m||'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body||{})});const j=await r.json().catch(()=>({error:r.statusText}));if(!r.ok)throw new Error(j.error||r.statusText);return j};
+const api=async(p,body,m)=>{const r=await fetch(p,body===undefined&&!m?{}:{method:m||'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body||{})});const j=await r.json().catch(()=>({error:r.statusText}));if(!r.ok)throw new Error(j.error||r.statusText);if(r.status==202&&j.job){const pid=p.split('/')[3];for(;;){await new Promise(z=>setTimeout(z,2500));const js=await (await fetch(`/api/projects/${pid}/job`)).json();if(js.state=='error')throw new Error(js.error);if(js.state!='running')return api(`/api/projects/${pid}`)}}return j};
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 function toast(m){$('toast').textContent=m;$('toast').style.display='block';setTimeout(()=>$('toast').style.display='none',2200)}
 function go(n){document.querySelectorAll('section').forEach((s,i)=>s.classList.toggle('on',i==n));document.querySelectorAll('#steps span').forEach((s,i)=>s.classList.toggle('on',i<=n&&n<6));
