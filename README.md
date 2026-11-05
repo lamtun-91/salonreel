@@ -37,3 +37,9 @@ Music tracks are **placeholders synthesized by ffmpeg** (`data/music/*.m4a`), so
 - Only the first 90s of a clip are rendered, which is the Reels limit.
 - The scheduler polls every 30s. Instagram's API has no native Reels scheduling, so the server does the scheduling.
 - MVP: Instagram auto-publish is disabled; the final step is Download + Copy caption. Set ENABLE_IG_PUBLISH=1 to re-enable the dormant Graph API code.
+
+## AI script pipeline
+- **Vision** (`/api/analyze`): samples 6–12 frames at known timestamps and returns `has_haircut`, `confidence`, look fields, and a timestamped `clip_breakdown` of `[{start_s,end_s,what_is_visible}]`. If confidence is below 0.4, the result is treated as no haircut.
+- **Script** (`/api/generate`): sends the prompt in `prompts/script_prompt.txt`, the salon profile (brand notes, stylist, services, booking text, city, language), and fixed rules: return `{"error":"no_haircut"}` when there is no haircut, no emoji in script lines, and timed lines that don't overlap. The server checks the output, clamps the times, and strips emoji.
+- **Render**: burns in each caption at its own `start_s`–`end_s`.
+- The salon profile is saved in the browser's localStorage, one profile per salon name.

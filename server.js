@@ -41,10 +41,11 @@ async function ensureMusic() {
   }
 }
 async function ensureSample() {
-  const f = D('uploads', 'sample.mp4');
-  if (!fs.existsSync(f)) await run('ffmpeg', ['-y', '-f', 'lavfi', '-i',
-    'gradients=s=720x1280:d=8:c0=0x6b3a2e:c1=0xc9a46a:c2=0x8b4a3b:c3=0xe8c8a8:speed=0.02,format=yuv420p',
-    '-vf', `drawtext=fontfile=${FONT}:text='Sample look':fontsize=64:fontcolor=white:x=(w-tw)/2:y=(h-th)/2`, '-r', '30', '-c:v', 'libx264', '-t', '8', f]);
+  const f = D('uploads', 'sample.mp4'), A = n => path.join(__dirname, 'assets', n);
+  if (fs.existsSync(f)) return;
+  const z = "scale=1440:2560,zoompan=z='min(zoom+0.0012,1.12)':d=150:s=720x1280:fps=30,setsar=1";
+  await run('ffmpeg', ['-y', '-loop', '1', '-t', '5', '-i', A('sample_front.jpg'), '-loop', '1', '-t', '5', '-i', A('sample_back.jpg'),
+    '-filter_complex', `[0:v]${z}[a];[1:v]${z}[b];[a][b]xfade=transition=fade:duration=1:offset=4,format=yuv420p[v]`, '-map', '[v]', '-c:v', 'libx264', '-t', '9', f]);
 }
 async function probe(f) {
   const j = JSON.parse(await run('ffprobe', ['-v', 'error', '-show_entries', 'format=duration:stream=codec_type', '-of', 'json', f]));
@@ -72,38 +73,7 @@ async function llm({ system, text, images = [] }) {
 }
 const parseJSON = s => JSON.parse(s.slice(s.indexOf('{'), s.lastIndexOf('}') + 1));
 
-// ---------- mocks ----------
-const LOOKS = [
-  { cut: 'Textured Shag', color: 'Copper Balayage', length: 'Shoulder', technique: 'Razor layering + hand-painted balayage', tags: ['Curtain bangs', 'Razor layering', 'Hand-painted balayage', 'Gloss toner'], standout: ['Soft face-framing movement', 'Warm copper dimension'] },
-  { cut: 'Long Butterfly Layers', color: 'Honey Blonde Highlights', length: 'Long', technique: 'Face-framing layers + foilyage', tags: ['Face-framing layers', 'Foilyage', 'Blowout', 'Root smudge'], standout: ['Bouncy volume', 'Seamless root melt'] },
-];
-function mockCopy(look, tone, salon) {
-  const { cut, color, tags } = look, t = tags.length ? tags : ['precision cutting'];
-  const T = {
-    luxe: { script: [`A ${cut.toLowerCase()} made to move`, `${color}, hand-finished`, `Crafted with ${t[0].toLowerCase()}`, `Reserve your chair at ${salon}`],
-      caption: `Quiet luxury, in motion. ✨ This ${cut.toLowerCase()} with ${color.toLowerCase()} was shaped with ${t[0].toLowerCase()}. Elevated, effortless, unmistakably you.\n\nReserve your appointment at ${salon} — link in bio.` },
-    fun: { script: ['POV: your hair just got a glow-up 💁‍♀️', `${cut} energy ⚡`, `${color} = obsessed 😍`, `Book it at ${salon}! 📅`],
-      caption: `Okay but LOOK at this ${cut.toLowerCase()} 😍🔥 ${color} + ${t[0].toLowerCase()} = main character vibes. Who's next?? 🙋‍♀️\n\nLink in bio to book at ${salon}! 💖` },
-    minimal: { script: [cut, color, t.slice(0, 2).join(' · '), salon], caption: `${cut}. ${color}.\n${t.join(' / ')}.\n\nBook — ${salon}, link in bio.` },
-  }[tone] || {};
-  const hashtags = [salon, cut, color, 'HairTransformation', 'SalonLife', 'HairReels'].map(x => '#' + x.normalize('NFD').replace(/[^a-z0-9]/gi, ''));
-  return { ...T, hashtags };
-}
-
-// ---------- ASS captions ----------
-const assEsc = s => String(s).replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\uFE0F\u200D]/gu, '').trim().replace(/[{}\\]/g, '').replace(/\n/g, ' ');
-const ts = s => { const h = s / 3600 | 0, m = (s % 3600) / 60 | 0, sec = (s % 60).toFixed(2).padStart(5, '0'); return `${h}:${String(m).padStart(2, '0')}:${sec}`; };
-function buildAss({ lines, salon, duration, per, tone }) {
-  const font = tone === 'luxe' ? 'DejaVu Serif' : 'DejaVu Sans';
-  let out = `[Script Info]\nScriptType: v4.00+\nPlayResX: 1080\nPlayResY: 1920\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Cap,${font},78,&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,1,${tone === 'luxe' ? 1 : 0},0,0,100,100,0,0,1,4,3,2,80,80,380,1
-Style: Brand,DejaVu Sans,54,&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,1,0,0,0,100,100,2,0,1,3,2,7,70,70,110,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n`;
-  out += `Dialogue: 0,${ts(0)},${ts(duration)},Brand,,0,0,0,,✂ ${assEsc(salon)}\n`;
-  const L = lines.filter(x => x.trim()); if (!L.length) return out;
-  for (let t = 0, i = 0; t < duration; t += per, i++)
-    out += `Dialogue: 1,${ts(t)},${ts(Math.min(duration, t + per))},Cap,,0,0,0,,{\\fad(300,300)\\move(540,1560,540,1540)}${assEsc(L[i % L.length])}\n`;
-  return out;
-}
+const P = require('./pipeline');
 
 // ---------- Instagram ----------
 const GRAPH = 'https://graph.facebook.com/' + (process.env.IG_GRAPH_VERSION || 'v21.0');
@@ -150,45 +120,51 @@ app.post('/api/upload', upload.single('video'), wrap(async (q, s) => {
   if (!q.file) return s.status(400).json({ error: 'no video' });
   s.json({ videoId: q.file.filename, url: '/uploads/' + q.file.filename, ...(await probe(q.file.path)) });
 }));
-app.post('/api/sample', wrap(async (q, s) => { await ensureSample(); s.json({ videoId: 'sample.mp4', url: '/uploads/sample.mp4' }); }));
+app.post('/api/sample', wrap(async (q, s) => { await ensureSample(); s.json({ videoId: 'sample.mp4', url: '/uploads/sample.mp4', ...(await probe(D('uploads', 'sample.mp4'))) }); }));
 
 app.post('/api/analyze', wrap(async (q, s) => {
-  const f = videoPath(q.body.videoId), { duration } = await probe(f), fid = id();
-  const pat = D('frames', fid + '_%02d.jpg');
-  await run('ffmpeg', ['-y', '-i', f, '-vf', `fps=${(6 / Math.max(duration, 1)).toFixed(4)},scale=768:-2`, '-frames:v', '6', '-q:v', '4', pat]);
-  const frames = fs.readdirSync(D('frames')).filter(n => n.startsWith(fid)).sort();
-  if (!cfg().llmLive) return s.json({ mode: 'demo', frames: frames.length, look: LOOKS[Math.random() * LOOKS.length | 0] });
-  const images = frames.map(n => fs.readFileSync(D('frames', n)).toString('base64'));
-  const txt = await llm({ system: 'You are an expert hairstylist and colorist analysing salon result videos. Reply with JSON only.', images,
-    text: `These are ${images.length} keyframes from a video of a finished hairstyle. Return JSON: {"cut":string,"color":string,"length":"Short|Chin|Shoulder|Mid|Long","technique":string,"tags":[4-6 short technique tags],"standout":[2-4 standout details],"confidence":0-1}. If no hair is visible, say so in "cut" and set confidence low.` });
-  frames.forEach(n => fs.unlinkSync(D('frames', n)));
-  s.json({ mode: 'live', provider: cfg().provider, frames: images.length, look: parseJSON(txt) });
+  const f = videoPath(q.body.videoId), { duration: full } = await probe(f), duration = Math.min(full, 90), fid = id();
+  const n = Math.max(6, Math.min(12, Math.round(duration / 1.5)));
+  const stamps = Array.from({ length: n }, (_, i) => (i + 0.5) * duration / n);
+  if (!cfg().llmLive) return s.json({ mode: 'demo', frames: n, duration, look: P.mockLook(duration) });
+  const images = [];
+  for (const [i, t] of stamps.entries()) {
+    const out = D('frames', `${fid}_${i}.jpg`);
+    await run('ffmpeg', ['-y', '-ss', t.toFixed(2), '-i', f, '-frames:v', '1', '-vf', 'scale=640:-2', '-q:v', '5', out]);
+    if (fs.existsSync(out)) { images.push(fs.readFileSync(out).toString('base64')); fs.unlinkSync(out); }
+  }
+  const txt = await llm({ system: P.visionSystem, images, text: P.visionPrompt(stamps, duration) });
+  s.json({ mode: 'live', provider: cfg().provider, frames: images.length, duration, look: P.cleanLook(parseJSON(txt), duration) });
 }));
 
 app.post('/api/generate', wrap(async (q, s) => {
-  const { look, tone = 'luxe', salon = 'our salon' } = q.body; const t = String(tone).toLowerCase();
-  if (!cfg().llmLive) return s.json({ mode: 'demo', ...mockCopy(look, t, salon) });
-  const txt = await llm({ system: 'You write Instagram Reels copy for hair salons. Reply with JSON only.',
-    text: `Salon: ${salon}\nTone: ${t} (luxe = elegant, understated luxury; fun = playful, emoji-friendly; minimal = terse, clean)\nLook analysis: ${JSON.stringify(look)}\nReturn JSON {"script":[4-5 on-screen caption lines, each under 40 chars],"caption":"Instagram caption under 1200 chars ending with a booking call to action","hashtags":[8-15 hashtags with #]}.` });
-  s.json({ mode: 'live', ...parseJSON(txt) });
+  const { look, tone = 'luxe', profile = {} } = q.body, t = String(tone).toLowerCase();
+  const duration = Math.min(+q.body.duration || 15, 90);
+  if (!look || look.has_haircut === false) return s.json({ mode: cfg().llmLive ? 'live' : 'demo', error: 'no_haircut' });
+  if (!cfg().llmLive) return s.json({ mode: 'demo', ...P.cleanCopy(P.mockCopy(look, t, profile, duration), duration) });
+  const txt = await llm({ system: P.copySystem, text: P.copyPrompt({ look, tone: t, profile, duration }) });
+  const c = P.cleanCopy(parseJSON(txt), duration);
+  if (!c.error && !c.script.length) throw new Error('AI returned no usable timed script lines; try Regenerate');
+  s.json({ mode: 'live', ...c });
 }));
 
 app.post('/api/render', wrap(async (q, s) => {
-  const { videoId, lines = [], salon = '', track = 'velvet', per = 2.5, tone = 'luxe' } = q.body;
+  const { videoId, salon = '', track = 'velvet', tone = 'luxe' } = q.body;
   const f = videoPath(videoId), { duration: full, hasAudio } = await probe(f), duration = Math.min(full, 90);
+  let lines = Array.isArray(q.body.lines) ? q.body.lines : [];
+  lines = lines.every(l => typeof l === 'string') ? P.autoTime(lines.filter(x => x.trim()), duration) : P.cleanSegments(lines, duration, 'text');
   const rid = id(), ass = D('tmp', rid + '.ass'), out = D('renders', rid + '.mp4');
-  fs.writeFileSync(ass, buildAss({ lines, salon, duration, per: Math.max(1, +per || 2.5), tone: String(tone).toLowerCase() }));
+  fs.writeFileSync(ass, P.buildAss({ lines, salon, duration, tone: String(tone).toLowerCase() }));
   const vf = `scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30,subtitles=${ass}:fontsdir=/usr/share/fonts/truetype/dejavu`;
-  const args = ['-y', '-i', f]; const music = TRACKS[track]?.expr ? D('music', track + '.m4a') : null;
-  if (music) args.push('-stream_loop', '-1', '-i', music);
-  let af;
-  if (music && hasAudio) af = ['-filter_complex', `[0:a]volume=0.35[a0];[1:a]volume=0.8[a1];[a0][a1]amix=inputs=2:duration=first[a]`, '-map', '0:v', '-map', '[a]'];
-  else if (music) af = ['-map', '0:v', '-map', '1:a'];
-  else af = hasAudio ? ['-map', '0:v', '-map', '0:a'] : ['-map', '0:v', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo'];
-  if (!music && !hasAudio) { args.push('-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo'); af = ['-map', '0:v', '-map', '1:a']; }
-  args.push('-vf', vf, ...af, '-t', String(duration), '-c:v', 'libx264', '-preset', 'veryfast', '-profile:v', 'high', '-pix_fmt', 'yuv420p', '-crf', '21', '-c:a', 'aac', '-b:a', '128k', '-ar', '44100', '-movflags', '+faststart', '-shortest', out);
+  const music = TRACKS[track]?.expr ? D('music', track + '.m4a') : null;
+  const args = ['-y', '-i', f]; let map;
+  if (music) { args.push('-stream_loop', '-1', '-i', music);
+    map = hasAudio ? ['-filter_complex', '[0:a]volume=0.35[a0];[1:a]volume=0.8[a1];[a0][a1]amix=inputs=2:duration=first[a]', '-map', '0:v', '-map', '[a]'] : ['-map', '0:v', '-map', '1:a'];
+  } else if (hasAudio) map = ['-map', '0:v', '-map', '0:a'];
+  else { args.push('-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo'); map = ['-map', '0:v', '-map', '1:a']; }
+  args.push('-vf', vf, ...map, '-t', String(duration), '-c:v', 'libx264', '-preset', 'veryfast', '-profile:v', 'high', '-pix_fmt', 'yuv420p', '-crf', '21', '-c:a', 'aac', '-b:a', '128k', '-ar', '44100', '-movflags', '+faststart', '-shortest', out);
   await run('ffmpeg', args); fs.unlinkSync(ass);
-  s.json({ renderId: rid + '.mp4', url: '/renders/' + rid + '.mp4', duration });
+  s.json({ renderId: rid + '.mp4', url: '/renders/' + rid + '.mp4', duration, lines });
 }));
 
 // MVP: Instagram publishing disabled (set ENABLE_IG_PUBLISH=1 to re-enable; code kept dormant)
