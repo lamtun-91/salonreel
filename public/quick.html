@@ -44,8 +44,8 @@ label{font-size:12px;font-weight:600;color:var(--mut);display:block;margin:12px 
 .stop{background:#fdecea;color:#8c1d18;border-radius:14px;padding:16px;margin-top:14px;font-size:14px}.bd{font-size:13px;margin:4px 0}.bd b{color:var(--rose);font-weight:600;margin-right:6px}details{margin-top:12px}summary{cursor:pointer;font-weight:600;font-size:14px}.two{display:grid;grid-template-columns:1fr 1fr;gap:0 14px}@media(max-width:720px){.two{grid-template-columns:1fr}}
 </style>
 </head><body>
-<header><div class="logo">Salon<i>Reel</i></div><span class="badge" id="badge">…</span></header>
-<div class="banner" id="banner"></div>
+<header><div class="logo">Salon<i>Reel</i></div></header>
+
 <div class="steps" id="steps"><span>1 Upload</span><span>2 Analyze</span><span>3 Script</span><span>4 Reel</span><span>5 Share</span></div>
 <main>
 <section id="s0"><h2>Show off the finished look</h2><p class="s">Upload a short video of the final hairstyle.</p>
@@ -110,9 +110,7 @@ function go(n){if(n==2&&look&&look.has_haircut===false)n=1;document.querySelecto
  document.querySelectorAll('#steps span').forEach((s,i)=>s.classList.toggle('on',i<=n));
  if(n==1)analyze();if(n==2&&!$('script').value)gen();if(n==3)reel();else stopReel();
  if(n==4){$('dlBig').href='/renders/'+render;$('final').value=$('caption').value+'\n\n'+$('tagsTxt').value}window.scrollTo(0,0)}
-fetch('/api/config').then(r=>r.json()).then(c=>{C=c;const b=$('banner');b.style.display='block';b.className='banner'+(c.llmLive?' live':'');
- b.textContent=c.llmLive?`AI: live (${c.provider})`:`DEMO MODE — no ${c.provider=='claude'?'ANTHROPIC_API_KEY':'XAI_API_KEY'}: analysis & copy are mock`;
- $('badge').textContent=c.llmLive?'AI · '+c.provider:'DEMO';$('track').innerHTML=c.tracks.map(t=>`<option value="${t.id}">♪ ${esc(t.label)}</option>`).join('')});
+fetch('/api/config').then(r=>r.json()).then(c=>{C=c;$('track').innerHTML=c.tracks.map(t=>`<option value="${t.id}">♪ ${esc(t.label)}</option>`).join('')});
 $('drop').onclick=()=>$('file').click();
 function busy(b,on,txt){b.disabled=on;if(txt)b.textContent=txt}
 $('file').onchange=async e=>{const f=e.target.files[0];if(!f)return;$('e0').textContent='';$('prev').innerHTML='<p class=s>Uploading…</p>';
