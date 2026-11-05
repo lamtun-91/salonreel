@@ -21,7 +21,7 @@ function cfg() {
   return {
     provider, llmLive: !!llmKey,
     igLive: !!(process.env.IG_ACCESS_TOKEN && process.env.IG_USER_ID && process.env.PUBLIC_BASE_URL),
-    xaiModel: process.env.XAI_MODEL || 'grok-4',
+    xaiModel: process.env.XAI_MODEL || 'grok-4.7',
     claudeModel: process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-5',
   };
 }
@@ -134,7 +134,7 @@ async function tick() {
   }
   if (changed) saveJobs(jobs);
 }
-setInterval(() => tick().catch(console.error), 30000);
+if (process.env.ENABLE_IG_PUBLISH === '1') setInterval(() => tick().catch(console.error), 30000);
 
 // ---------- routes ----------
 const app = express(); app.use(express.json({ limit: '1mb' }));
@@ -191,7 +191,8 @@ app.post('/api/render', wrap(async (q, s) => {
   s.json({ renderId: rid + '.mp4', url: '/renders/' + rid + '.mp4', duration });
 }));
 
-app.post('/api/publish', wrap(async (q, s) => {
+// MVP: Instagram publishing disabled (set ENABLE_IG_PUBLISH=1 to re-enable; code kept dormant)
+if (process.env.ENABLE_IG_PUBLISH === '1') app.post('/api/publish', wrap(async (q, s) => {
   const { renderId, caption = '', when } = q.body;
   if (!/^[\w]+\.mp4$/.test(renderId || '') || !fs.existsSync(D('renders', renderId))) return s.status(400).json({ error: 'render first' });
   if (caption.length > 2200) return s.status(400).json({ error: 'caption over 2200 chars' });

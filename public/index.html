@@ -45,7 +45,7 @@ label{font-size:12px;font-weight:600;color:var(--mut);display:block;margin:12px 
 </head><body>
 <header><div class="logo">Salon<i>Reel</i></div><span class="badge" id="badge">…</span></header>
 <div class="banner" id="banner"></div>
-<div class="steps" id="steps"><span>1 Upload</span><span>2 Analyze</span><span>3 Script</span><span>4 Reel</span><span>5 Instagram</span></div>
+<div class="steps" id="steps"><span>1 Upload</span><span>2 Analyze</span><span>3 Script</span><span>4 Reel</span><span>5 Share</span></div>
 <main>
 <section id="s0"><h2>Show off the finished look</h2><p class="s">Upload a short video of the final hairstyle.</p>
 <div class="drop" id="drop"><div style="font-size:40px">✂️</div><b>Tap to choose a video</b><div style="color:var(--mut);font-size:13px">MP4 / MOV · vertical works best · max 90s used</div>
@@ -72,16 +72,15 @@ label{font-size:12px;font-weight:600;color:var(--mut);display:block;margin:12px 
 <div class="note">Tracks are ffmpeg-synthesized placeholders (royalty-free). Swap in licensed audio in data/music/.</div>
 <div class="row" style="margin-top:18px"><button class="btn" id="renderBtn">🎬 Render MP4</button></div>
 <div id="rstat" style="font-size:13px;margin-top:10px;color:var(--mut)"></div><div class="err" id="e3"></div>
-<div class="row" style="margin-top:18px"><button class="btn ghost" onclick="go(2)">← Edit copy</button><button class="btn rose" id="toIG" disabled>Prep for Instagram →</button></div></div></div></section>
+<div class="row" style="margin-top:18px"><button class="btn ghost" onclick="go(2)">← Edit copy</button><button class="btn rose" id="toIG" disabled>Get my Reel →</button></div></div></div></section>
 
-<section id="s4"><h2>Ready for Instagram</h2><p class="s">Final check before it goes live.</p>
-<label>Final caption</label><textarea id="final" rows="8"></textarea>
-<label>Schedule (leave as now to post immediately)</label><input type="datetime-local" id="when">
-<div class="row" style="margin-top:18px"><button class="btn ghost" id="copy">Copy caption</button><button class="btn rose" id="post">Post to Instagram</button><button class="btn ghost" onclick="location.reload()">Start over</button></div>
-<div class="err" id="e4"></div><div class="note" id="igNote"></div></section>
+<section id="s4"><h2>Your Reel is ready</h2><p class="s">Download it, copy the caption, and post it from your phone.</p>
+<a class="btn rose" id="dlBig" download="salonreel.mp4" style="display:block;text-align:center;text-decoration:none;font-size:18px;padding:18px">⬇ Download Reel (MP4)</a>
+<label>Caption &amp; hashtags</label><textarea id="final" rows="8"></textarea>
+<div class="row" style="margin-top:14px"><button class="btn" id="copy">Copy caption &amp; hashtags</button><button class="btn ghost" onclick="location.reload()">Start over</button></div>
+<div class="note">📱 Post it yourself: send the MP4 to your phone, open Instagram → + → Reel, pick the video, paste the caption, and share. The best times to post are usually weekday evenings.</div></section>
 </main>
 <div class="toast" id="toast"></div>
-<div class="modal" id="modal"><div><div style="font-size:42px">💫</div><h2 id="mh"></h2><p class="s" id="mtxt"></p><button class="btn" onclick="modal.style.display='none'">Done</button></div></div>
 <script>
 const $=id=>document.getElementById(id);let C={},vid=null,vurl=null,look=null,tone='Luxe',capTimer=null,render=null;
 const api=async(p,body)=>{const r=await fetch(p,body instanceof FormData?{method:'POST',body}:{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body||{})});const j=await r.json();if(!r.ok)throw new Error(j.error||r.statusText);return j};
@@ -89,11 +88,11 @@ const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',
 function go(n){document.querySelectorAll('section').forEach((s,i)=>s.classList.toggle('on',i==n));
  document.querySelectorAll('#steps span').forEach((s,i)=>s.classList.toggle('on',i<=n));
  if(n==1)analyze();if(n==2&&!$('script').value)gen();if(n==3)reel();else stopReel();
- if(n==4)$('final').value=$('caption').value+'\n\n'+$('tagsTxt').value;window.scrollTo(0,0)}
+ if(n==4){$('dlBig').href='/renders/'+render;}if(n==4)$('final').value=$('caption').value+'\n\n'+$('tagsTxt').value;window.scrollTo(0,0)}
 fetch('/api/config').then(r=>r.json()).then(c=>{C=c;const b=$('banner');b.style.display='block';
- b.className='banner'+(c.llmLive&&c.igLive?' live':'');
- b.textContent=(c.llmLive?`AI: live (${c.provider})`:`DEMO MODE — no ${c.provider=='claude'?'ANTHROPIC_API_KEY':'XAI_API_KEY'}: analysis & copy are mock`)+' · '+(c.igLive?'Instagram: live':'Instagram: demo (no credentials, nothing posts)');
- $('badge').textContent=c.llmLive?'AI · '+c.provider:'DEMO';$('igNote').textContent=c.igLive?'Live: this will publish a Reel to your connected Instagram account.':'Demo mode: Instagram credentials not set — nothing will be posted.';
+ b.className='banner'+(c.llmLive?' live':'');
+ b.textContent=(c.llmLive?`AI: live (${c.provider})`:`DEMO MODE — no ${c.provider=='claude'?'ANTHROPIC_API_KEY':'XAI_API_KEY'}: analysis & copy are mock`);
+ $('badge').textContent=c.llmLive?'AI · '+c.provider:'DEMO';
  $('track').innerHTML=c.tracks.map(t=>`<option value="${t.id}">♪ ${esc(t.label)}</option>`).join('')});
 $('drop').onclick=()=>$('file').click();
 function busy(b,on,txt){b.disabled=on;if(txt)b.textContent=txt}
@@ -128,15 +127,7 @@ $('renderBtn').onclick=async()=>{const b=$('renderBtn');busy(b,true,'Rendering�
   $('rstat').innerHTML=`Rendered ${r.duration.toFixed(1)}s · <a class=dl href="${r.url}" target=_blank>▶ Watch</a> · <a class=dl href="${r.url}" download="salonreel.mp4">⬇ Download MP4</a>`;$('toIG').disabled=false}
  catch(x){$('e3').textContent=x.message;$('rstat').textContent=''}busy(b,false,'🎬 Render MP4')};
 $('toIG').onclick=()=>go(4);
-const d=new Date();$('when').value=new Date(d-d.getTimezoneOffset()*6e4).toISOString().slice(0,16);
 function toast(m){$('toast').textContent=m;$('toast').style.display='block';setTimeout(()=>$('toast').style.display='none',2200)}
 $('copy').onclick=async()=>{try{await navigator.clipboard.writeText($('final').value)}catch(e){$('final').select();document.execCommand('copy')}toast('Caption copied ✓')};
-$('post').onclick=async()=>{const b=$('post');$('e4').textContent='';
- if(C.igLive&&!confirm('Publish this Reel to Instagram now/at the scheduled time?'))return;busy(b,true,'Working…');
- try{const r=await api('/api/publish',{renderId:render,caption:$('final').value,when:new Date($('when').value).toISOString()});
-  if(r.scheduled){$('mh').textContent='Scheduled'+(r.mode=='demo'?' (demo)':'');$('mtxt').textContent='Will publish '+new Date(r.scheduled.when).toLocaleString()+(r.mode=='demo'?'. Demo mode: no Instagram credentials, so nothing will actually post.':'. Keep the server running.')}
-  else if(r.published){$('mh').textContent='Published 🎉';$('mtxt').textContent='Instagram media id: '+r.mediaId}
-  else{$('mh').textContent='Demo — not posted';$('mtxt').textContent=r.message}$('modal').style.display='flex'}
- catch(x){$('e4').textContent=x.message}busy(b,false,'Post to Instagram')};
 go(0);
 </script></body></html>

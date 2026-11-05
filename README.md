@@ -36,4 +36,4 @@ Music tracks are **placeholders synthesized by ffmpeg** (`data/music/*.m4a`), so
 ## Notes
 - Only the first 90s of a clip are rendered, which is the Reels limit.
 - The scheduler polls every 30s. Instagram's API has no native Reels scheduling, so the server does the scheduling.
-- The Post button asks for confirmation before it publishes for real.
+- MVP: Instagram auto-publish is disabled; the final step is Download + Copy caption. Set ENABLE_IG_PUBLISH=1 to re-enable the dormant Graph API code.
