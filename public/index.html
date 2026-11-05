@@ -49,8 +49,8 @@ label{font-size:12px;font-weight:600;color:var(--mut);display:block;margin:12px 
 <div class="banner" id="banner"></div>
 <div class="steps" id="steps"><span>1 Brief</span><span>2 Shot list</span><span>3 Film</span><span>4 Check</span><span>5 Edit</span><span>6 Export</span></div>
 <main>
-<section id="s0"><h2>Plan a new Reel</h2><p class="s">Tell us the look you want. Grok writes the script and a shot list to film.</p>
-<label>Salon name</label><input id="salon" value="Maison Lumière">
+<section id="s0"><h2>Plan a new Reel</h2><p class="s">Tell us the look you want. AI writes the script and a shot list to film.</p>
+<label>Salon name</label><input id="salon" value="Olya Atelier">
 <div class="two"><div><label>Reel style</label><select id="style"></select></div><div><label>Mood</label><select id="mood"></select></div>
 <div><label>Music</label><select id="music"></select></div><div><label>Language</label><select id="language"><option>English</option><option>Spanish</option><option>French</option><option>Vietnamese</option><option>Portuguese</option><option>German</option><option>Italian</option></select></div></div>
 <details><summary>Salon profile (saved on this device per salon)</summary>
@@ -62,16 +62,16 @@ label{font-size:12px;font-weight:600;color:var(--mut);display:block;margin:12px 
 <section id="s1"><h2>Your shot list</h2><p class="s" id="concept"></p><div id="shots"></div><label>Draft script</label><div id="draft" style="font-size:14px"></div>
 <div class="row" style="margin-top:18px"><button class="btn ghost" onclick="go(0)">← Change brief</button><button class="btn rose" onclick="go(2)">Start filming →</button></div></section>
 
-<section id="s2"><h2>Film each shot</h2><p class="s">Tap a shot to open your camera (vertical). Or upload one video of the whole appointment and Grok will split it.</p>
+<section id="s2"><h2>Film each shot</h2><p class="s">Tap a shot to open your camera (vertical). Or upload one video of the whole appointment and AI will split it.</p>
 <div id="slots"></div>
-<details style="margin-top:16px"><summary>Upload one video instead</summary><p class="s" style="margin-top:8px">Grok samples about 1 frame per second and matches parts of the video to each shot.</p>
+<details style="margin-top:16px"><summary>Upload one video instead</summary><p class="s" style="margin-top:8px">The AI samples about 1 frame per second and matches parts of the video to each shot.</p>
 <input type="file" accept="video/*" id="fullFile"><div class="prog" id="fullProg"></div></details>
 <div class="err" id="e2"></div><div class="row" style="margin-top:18px"><button class="btn ghost" onclick="go(1)">← Shot list</button><button class="btn rose" id="qcBtn">Check my clips →</button></div></section>
 
 <section id="s3"><h2>Quality check</h2><p class="s" id="qcStat"></p><div id="qc"></div><div id="gaps"></div><div class="err" id="e3"></div>
 <div class="row" style="margin-top:18px"><button class="btn ghost" onclick="go(2)">← Reshoot / add clips</button><button class="btn rose" id="editBtn">Edit my Reel →</button></div></section>
 
-<section id="s4"><h2>Editing…</h2><p class="s" id="edStat">Grok is planning cuts, speed, zooms and transitions on the beat, then writing your captions. Rendering takes a minute.</p><div class="bar"><div id="bar"></div></div><div class="err" id="e4"></div></section>
+<section id="s4"><h2>Editing…</h2><p class="s" id="edStat">AI is planning cuts, speed, zooms and transitions on the beat, then writing your captions. Rendering takes a minute.</p><div class="bar"><div id="bar"></div></div><div class="err" id="e4"></div></section>
 
 <section id="s5"><h2>Review &amp; export</h2><div class="grid"><div><div class="phone" style="border-width:8px"><video id="prevV" controls playsinline controlsList="nodownload" style="position:absolute;inset:0;width:100%;height:100%;max-height:none;border-radius:0;object-fit:cover"></video></div><p class="prog" id="planSum" style="text-align:center"></p></div>
 <div><label>On-screen text (start s · end s · text)</label><div id="ovls"></div><button class="btn ghost" id="rerBtn" style="margin-top:8px">↻ Re-render with edits</button><div class="prog" id="rerStat"></div>
@@ -102,7 +102,7 @@ api('/api/studio/config').then(c=>{C=c;$('style').innerHTML=c.styles.map(s=>`<op
 $('salon').onchange=loadProfile;PF.forEach(k=>$(k).addEventListener('change',saveProfile));
 const profile=()=>({salon:$('salon').value.trim(),stylist:$('stylist').value.trim(),city:$('city').value.trim(),services:$('services').value.trim(),booking:$('booking').value.trim(),language:$('language').value,brandNotes:$('brandNotes').value.trim()});
 async function busyRun(btn,label,fn,errEl){const t=btn.textContent;btn.disabled=true;btn.textContent=label;$(errEl).textContent='';try{await fn()}catch(x){$(errEl).textContent=x.message}btn.disabled=false;btn.textContent=t}
-$('planBtn').onclick=()=>busyRun($('planBtn'),'Planning with '+(C.llmLive?'Grok':'demo')+'…',async()=>{saveProfile();P=await api('/api/projects',{profile:profile(),style:$('style').value,mood:$('mood').value,music:$('music').value});location.hash=P.id;go(1)},'e0');
+$('planBtn').onclick=()=>busyRun($('planBtn'),'Planning with '+(C.llmLive?'AI':'demo')+'…',async()=>{saveProfile();P=await api('/api/projects',{profile:profile(),style:$('style').value,mood:$('mood').value,music:$('music').value});location.hash=P.id;go(1)},'e0');
 async function openProject(id){P=await api('/api/projects/'+id);location.hash=id;go(P.render?5:P.qc?3:Object.keys(P.clips||{}).length?2:1)}
 function drawShots(){$('concept').textContent=(P.plan.mode=='demo'?'[demo] ':'')+P.plan.concept;
  $('shots').innerHTML=P.plan.shots.map((s,i)=>`<div class=shot><h4>${i+1}. ${esc(s.name)} <span class="pill warn">${s.type} · ${s.target_s}s</span></h4><div class=m>📷 ${esc(s.framing)}</div><div class=m>💡 ${esc(s.tips)}</div></div>`).join('');
@@ -116,7 +116,7 @@ function putFile(url,headers,file,onp){return new Promise((res,rej)=>{const x=ne
  x.upload.onprogress=e=>e.lengthComputable&&onp(Math.round(e.loaded/e.total*100));x.onload=()=>x.status<300?res():rej(new Error('Upload failed ('+x.status+')'));x.onerror=()=>rej(new Error('Upload blocked (network/CORS)'));x.send(file)})}
 async function upload(slot,file,pg){if(!file)return;$('e2').textContent='';try{const ext=(file.name.split('.').pop()||'mp4').toLowerCase();
  const u=await api(`/api/projects/${P.id}/upload-url`,{slot,contentType:file.type||'video/mp4',ext});pg.textContent='Uploading 0%';
- await putFile(u.url,u.headers,file,p=>pg.textContent='Uploading '+p+'%');pg.textContent=slot=='full'?'Splitting with Grok…':'Processing…';
+ await putFile(u.url,u.headers,file,p=>pg.textContent='Uploading '+p+'%');pg.textContent=slot=='full'?'Splitting with AI…':'Processing…';
  P=await api(`/api/projects/${P.id}/clips`,{slot,key:u.key});pg.textContent='';drawSlots();if(slot=='full')toast(`Split into ${Object.keys(P.clips).length} shots`)}catch(x){pg.textContent='';$('e2').textContent=x.message}}
 $('fullFile').onchange=e=>upload('full',e.target.files[0],$('fullProg'));
 $('qcBtn').onclick=()=>busyRun($('qcBtn'),'Checking clips…',async()=>{P=await api(`/api/projects/${P.id}/qc`,{});go(3)},'e2');

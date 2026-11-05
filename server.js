@@ -68,7 +68,7 @@ async function llm({ system, text, images = [] }) {
   const r = await fetch('https://api.x.ai/v1/chat/completions', { method: 'POST',
     headers: { Authorization: 'Bearer ' + process.env.XAI_API_KEY, 'content-type': 'application/json' },
     body: JSON.stringify({ model: c.xaiModel, messages: [{ role: 'system', content: system }, { role: 'user', content }] }) });
-  const j = await r.json(); if (!r.ok) throw new Error('Grok: ' + JSON.stringify(j.error || j));
+  const j = await r.json(); if (!r.ok) throw new Error('AI: ' + JSON.stringify(j.error || j));
   return j.choices[0].message.content;
 }
 const parseJSON = s => JSON.parse(s.slice(s.indexOf('{'), s.lastIndexOf('}') + 1));
