@@ -198,9 +198,22 @@ module.exports = ({ app, llm, parseJSON, run, probe, cfg, TRACKS, D, id, wrap })
       if (!c?.key) throw new Error('missing clip key for ' + sg.shot_id);
       clipUrls[sg.shot_id] = await mediaUrl(c.key);
     }
-    const musicUrl = p.musicOn === false ? null : await ensureMusicUrl(p, e.track); // no-music export omits the soundtrack clip
+    // Music bed: a sample-accurate WAV excerpt cut by ffmpeg from music_start_s, played from 0. Measured on live renders, Shotstack's own
+    // audio trim lands on video-frame steps and AAC priming adds ~23ms, which put the drop 23-38ms late; a pre-cut WAV has neither.
+    let musicUrl = null, musicBed = null;
+    if (p.musicOn !== false && e.track !== 'none') {
+      const local = MUSIC.fileFor(e.track); if (!local) throw new Error('music file missing for track ' + e.track);
+      const ms = Math.max(0, +e.music_start_s || 0), len = Math.round((e.total + 0.5) * 1000) / 1000;
+      const tag = crypto.createHash('md5').update(JSON.stringify([e.track, ms, len])).digest('hex').slice(0, 10);
+      const bed = path.join(cache(p.id), `bed_${tag}.wav`), key = `projects/${p.id}/music/bed_${tag}.wav`;
+      if (!(await st.exists(key).catch(() => false))) {
+        await run('ffmpeg', ['-y', '-i', local, '-ss', ms.toFixed(3), '-t', len.toFixed(3), '-ac', '2', '-ar', '44100', '-c:a', 'pcm_s16le', bed]);
+        await st.putFile(key, bed, 'audio/wav'); try { fs.unlinkSync(bed); } catch {}
+      }
+      musicUrl = await mediaUrl(key); musicBed = { key, start_s: ms, length_s: len, format: 'wav', note: 'pre-cut, played from 0' };
+    }
     const crops = Object.fromEntries((p.qc?.clips || []).filter(q => q.crop).map(q => [q.shot_id, q.crop]));
-    const { edit: payload, meta } = SS.buildEditPayload({ edit: e, clips: p.clips, clipUrls, musicUrl, profile: p.profile || {}, crops });
+    const { edit: payload, meta } = SS.buildEditPayload({ edit: { ...e, music_start_s: 0 }, clips: p.clips, clipUrls, musicUrl, profile: p.profile || {}, crops });
     const client = SS.createClient();
     // Resume polling an in-flight Shotstack job instead of re-submitting (avoids duplicate renders).
     let renderId = p.render?.provider === 'shotstack' && p.render?.status && p.render.status !== 'done' && p.render.status !== 'failed'
@@ -238,11 +251,11 @@ module.exports = ({ app, llm, parseJSON, run, probe, cfg, TRACKS, D, id, wrap })
     p.render = {
       key, at: new Date().toISOString(), duration, plan_total: e.total, transitions: 'crossfade-or-cut', music: !!musicUrl, music_track: musicUrl ? e.track : null,
       provider: 'shotstack', renderId, status: 'done', env: client.version, watermarked: client.version === 'stage',
-      approximations: meta.approximations, url: done.url, loudness,
+      approximations: meta.approximations, url: done.url, loudness, music_bed: musicBed,
     };
     delete p.consent; delete p.export;
   }
-  const RENDER_VERSION = 4; // bump when renderer output changes so cached variants are not reused
+  const RENDER_VERSION = 5; // bump when renderer output changes so cached variants are not reused
   const editSig = e => crypto.createHash('md5').update(JSON.stringify([RENDER_VERSION, e.segments, e.overlays, e.music_start_s, e.track])).digest('hex').slice(0, 12);
   async function renderProject(p, { music } = {}) {
     p.musicOn = music === undefined ? p.edit?.music !== false : !!music;
