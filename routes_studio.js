@@ -1,6 +1,7 @@
 // Studio API: projects stored in R2 (or local disk) under projects/{id}/
 const fs = require('fs'), path = require('path'), crypto = require('crypto');
 const MUSIC = require('./music'), st = require('./storage'), S = require('./studio'), P = require('./pipeline'), SS = require('./shotstack');
+const MASTER = require('./master');
 const CONSENT = 'The client agreed to be featured online.';
 const P_outDur = sg => Math.round(SS.segmentTimelineDuration(sg) * 1000) / 1000;
 
@@ -70,6 +71,12 @@ module.exports = ({ app, llm, parseJSON, run, probe, cfg, TRACKS, D, id, wrap })
     s.json(await view(await save(p)));
   }));
 
+  // add a shot slot to the plan (e.g. a mirror moment); clears QC/edit so the gate re-runs
+  app.post('/api/projects/:id/shots', wrap(async (q, s) => {
+    const p = await load(q.params.id); const shot = S.addShot(p.plan, q.body || {}, p.inputs.style);
+    delete p.qc; delete p.edit; delete p.render; delete p.consent; delete p.export; delete p.gaps; delete p.renderVariants;
+    s.json({ shot, project: await view(await save(p)) });
+  }));
   // 2. guided filming: presigned upload, then register
   app.post('/api/projects/:id/upload-url', wrap(async (q, s) => {
     const p = await load(q.params.id), slot = String(q.body.slot || ''), ct = String(q.body.contentType || 'video/mp4');
@@ -178,9 +185,10 @@ module.exports = ({ app, llm, parseJSON, run, probe, cfg, TRACKS, D, id, wrap })
     const out = path.join(dir, `render_${Date.now().toString(36)}.mp4`);
     args.push('-filter_complex_threads', '1', '-filter_complex', fc.join(';'), '-map', '[vout]', '-map', '[aout]', '-t', total.toFixed(3), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '21', '-pix_fmt', 'yuv420p', '-threads', '1', '-x264-params', 'rc-lookahead=4:sync-lookahead=0:bframes=1', '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', out);
     await run('ffmpeg', args); if (acc.includes('acc_')) fs.unlinkSync(acc);
+    const loudness = await MASTER.masterFile(out).catch(err => ({ error: String(err.message).slice(0, 200) })); // -14 LUFS, <= -1 dBTP
     let measured = total; try { measured = (await probe(out)).duration || total; } catch {}
     const key = `projects/${p.id}/renders/${path.basename(out)}`; await st.putFile(key, out, 'video/mp4'); fs.unlinkSync(out);
-    p.render = { key, at: new Date().toISOString(), duration: Math.round(measured * 100) / 100, plan_total: e.total, assembled: Math.round(accDur * 100) / 100, provider: 'ffmpeg', transitions: 'xfade-or-cut', music: !!music, music_track: music ? e.track : null }; delete p.consent; delete p.export;
+    p.render = { key, at: new Date().toISOString(), duration: Math.round(measured * 100) / 100, plan_total: e.total, assembled: Math.round(accDur * 100) / 100, provider: 'ffmpeg', transitions: 'xfade-or-cut', music: !!music, music_track: music ? e.track : null, loudness }; delete p.consent; delete p.export;
   }
   async function renderWithShotstack(p) {
     const e = p.edit;
@@ -219,6 +227,8 @@ module.exports = ({ app, llm, parseJSON, run, probe, cfg, TRACKS, D, id, wrap })
     const dir = cache(p.id);
     const out = path.join(dir, `shotstack_${renderId}.mp4`);
     await client.downloadToFile(done.url, out);
+    // Shotstack can't guarantee a true-peak ceiling: master the downloaded file's audio (video stream copied as-is)
+    const loudness = await MASTER.masterFile(out).catch(err => ({ error: String(err.message).slice(0, 200) }));
     let duration = meta.total;
     try { duration = (await probe(out)).duration || meta.total; } catch {}
     duration = Math.round(duration * 100) / 100;
@@ -228,11 +238,11 @@ module.exports = ({ app, llm, parseJSON, run, probe, cfg, TRACKS, D, id, wrap })
     p.render = {
       key, at: new Date().toISOString(), duration, plan_total: e.total, transitions: 'crossfade-or-cut', music: !!musicUrl, music_track: musicUrl ? e.track : null,
       provider: 'shotstack', renderId, status: 'done', env: client.version, watermarked: client.version === 'stage',
-      approximations: meta.approximations, url: done.url,
+      approximations: meta.approximations, url: done.url, loudness,
     };
     delete p.consent; delete p.export;
   }
-  const RENDER_VERSION = 2; // bump when renderer output changes so cached variants are not reused
+  const RENDER_VERSION = 3; // bump when renderer output changes so cached variants are not reused
   const editSig = e => crypto.createHash('md5').update(JSON.stringify([RENDER_VERSION, e.segments, e.overlays, e.music_start_s, e.track])).digest('hex').slice(0, 12);
   async function renderProject(p, { music } = {}) {
     p.musicOn = music === undefined ? p.edit?.music !== false : !!music;
@@ -310,6 +320,7 @@ module.exports = ({ app, llm, parseJSON, run, probe, cfg, TRACKS, D, id, wrap })
     if (copy.error) { p.status = 'needs_reshoot'; await save(p); throw new Error('no_haircut'); }
     // time each line to the clip actually on screen (writer gives line.clip; fallback max overlap)
     p.edit.overlays = S.alignOverlays(copy.script, p.edit); p.edit.overlays_source = copy.script.map(({ text, start_s, end_s, clip }) => ({ text, start_s, end_s, clip }));
+    { const sf = S.fixSpeedClaims(p.edit.overlays, p.edit); p.edit.overlays = sf.lines; p.edit.speed_fixes = sf.fixes; } // captions match real clip speed
     p.edit.overlay_check = S.validateOverlays(p.edit.overlays, p.edit); p.edit.caption_mode = copy.mode || (live() ? 'text' : 'demo'); if (copy.frames) p.edit.caption_frames = copy.frames; p.copy = { caption: copy.caption, hashtags: copy.hashtags };
     delete p.renderVariants; await renderProject(p, { music: q.body.music }); p.status = 'review'; if (override) p.edit.qc_overridden = true;
     await save(p);

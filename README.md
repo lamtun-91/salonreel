@@ -62,3 +62,11 @@ Storage layout: `projects/{id}/project.json`, `projects/{id}/raw/*`, `projects/{
 - Captions are written from 1-2 keyframes per clip of the final edit (vision), then snapped to the clip on screen; text-only fallback if frames or the vision call fail.
 - `music:false` on `/edit`, `/rerender` or `/export` gives a no-music version with identical timing (Shotstack: no soundtrack clip; ffmpeg: silent bed). Recorded as `render.music`, `export.music`, `renderVariants`.
 - Shotstack stays on the sandbox (`SHOTSTACK_ENV` default `stage`, watermarked) until a production key is added with `SHOTSTACK_ENV=v1`.
+
+## Loudness, drop sync and captions (2026-11-18, EDM test)
+- Final mix mastered to about -14 LUFS integrated, true peak <= -1 dBTP (`master.js`, two-pass loudnorm on the audio only, video stream copied). Runs on ffmpeg renders and on the downloaded Shotstack MP4; silent no-music mixes are left alone. Result stored in `render.loudness`.
+- Reveal clips never play below 1.0x (server clamp + planner rule).
+- Caption writer gets each clip's real speed; the server strips "slow"/"fast" claims that contradict it (`edit.speed_fixes`).
+- Usable clips the planner skipped are added as short real-speed beats while the reel stays within the duration limit (`edit.included_unused`).
+- Tracks with a drop: the reveal comes in on a hard cut and `music_start_s = drop_s - reveal cut frame`, so the drop lands on the cut (`edit.reveal_cut_s`). Drop times in `music/manifest.json` are onset-refined (5 ms).
+- `POST /api/projects/:id/shots {name,type,before}` adds a shot slot (e.g. a mirror moment).

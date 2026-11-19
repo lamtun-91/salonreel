@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "test": "node --test test/*.test.js",
-    "syntax:check": "node --check server.js && node --check routes_studio.js && node --check studio.js && node --check pipeline.js && node --check storage.js && node --check shotstack.js && node --check music.js"
+    "syntax:check": "node --check server.js && node --check routes_studio.js && node --check studio.js && node --check pipeline.js && node --check storage.js && node --check shotstack.js && node --check music.js && node --check master.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1162.0",

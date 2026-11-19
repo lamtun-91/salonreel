@@ -228,6 +228,9 @@ test('#10 under the floor, usable clips the planner skipped are added in story o
     { shots, clips, qc, music: 'velvet-house' });
   assert.deepEqual(e.segments.map(s => s.shot_id), ['s1', 's3', 's5']);
   assert.deepEqual(e.added_for_length, ['s3']);
-  assert.ok(e.total >= 15 && e.total <= 18.1, 'total ' + e.total);
+  // reveal is clamped to 1.0x (no slow-mo), so all real footage (3 x 5.04s minus one 0.4s crossfade) is just under the 15s floor: short is fine, no padding
+  assert.ok(e.total >= 14.5 && e.total <= 18.1, 'total ' + e.total);
+  assert.ok(e.segments.every(s => s.in_s === 0 && s.out_s >= 5.03), 'all usable footage used');
+  assert.equal(e.segments[2].speed, 1);
   assert.equal(e.segments[1].speed, 1);
 });

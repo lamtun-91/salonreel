@@ -36,6 +36,16 @@ const REVEAL_ONLY_FILL = [
   { name: 'Side profile', type: 'detail', framing: 'Side profile, head and shoulders, vertical', tips: 'Walk a slow half-circle to show the shape and line', target_s: 4 },
   { name: 'Back and length', type: 'detail', framing: 'Back view, full length of hair, vertical', tips: 'Stylist runs fingers through once to show movement', target_s: 4 },
   { name: 'Final turn', type: 'reveal', framing: 'Front, head-and-shoulders, vertical', tips: 'Client turns to camera and smiles; hold for 2 seconds', target_s: 5 }];
+// Add one more shot slot to an existing plan (e.g. a mirror moment the planner didn't ask for). Max 8 shots; ids stay unique.
+function addShot(plan, body, style) {
+  const shots = plan.shots || []; if (shots.length >= 8) throw new Error('A plan can have at most 8 shots');
+  const allowed = styleTypes(style), type = allowed.includes(body.type) ? body.type : 'detail';
+  const id = 's' + (Math.max(0, ...shots.map(x => +String(x.id).slice(1) || 0)) + 1);
+  const shot = { id, name: String(body.name || type).slice(0, 40), type, framing: String(body.framing || '').slice(0, 200), tips: String(body.tips || '').slice(0, 200),
+    target_s: r1(clamp(body.target_s || 3, 2, 8)), added: true };
+  const k = body.before ? shots.findIndex(x => x.id === body.before) : -1;
+  shots.splice(k < 0 ? shots.length : k, 0, shot); plan.shots = shots; return shot;
+}
 function cleanShots(j, style) {
   const allowed = styleTypes(style);
   let raw = (Array.isArray(j.shots) ? j.shots : []);
@@ -223,9 +233,9 @@ function editPrompt({ shots, clips, qc, mood, music, style }) {
   return `You are a short-form video editor. Build an edit plan for a ${style} hair salon Reel, mood ${mood}, music ${music} at ${TRACK_BPM[music] || 100} bpm (beat every ${(60 / (TRACK_BPM[music] || 100)).toFixed(2)}s).
 Available clips: ${JSON.stringify(usable)}
 Return JSON only:
-{"segments":[{"shot_id":"s1","in_s":number,"out_s":number (within clip),"speed":0.5-2 (1 = normal; use >1 for cutting/blow-dry, slow-mo 0.6-0.8 for reveal),"ramp_to":optional speed for the second half,"zoom":{"type":"none|punch_in|push_in","at_s":seconds into segment,"scale":1.0-1.3},"transition_in":{"type":one of ${JSON.stringify(TRANSITIONS)},"duration":0.2-0.8}}],
+{"segments":[{"shot_id":"s1","in_s":number,"out_s":number (within clip),"speed":0.5-2 (1 = normal; use >1 for cutting/blow-dry; reveal clips always 1.0 or faster, never slow-mo),"ramp_to":optional speed for the second half,"zoom":{"type":"none|punch_in|push_in","at_s":seconds into segment,"scale":1.0-1.3},"transition_in":{"type":one of ${JSON.stringify(TRANSITIONS)},"duration":0.2-0.8}}],
  "beat_markers":[seconds on the final timeline where cuts should land],"music_start_s":0-20}
-Rules: total about ${pol.target_s}s (usable footage ${pol.usable_s}s; up to ${pol.max_s}s only if there is enough good footage; never over 30s; at least ${pol.floor_s}s when the footage allows). Never slow clips down or hold frames just to reach a length; a shorter reel is fine when footage is thin. Story order; the reveal last and longest; cuts on beats; first segment transition_in is "cut". Never use any part of a clip inside its avoid_ranges_s (garbled text, blur); skip a clip if nothing usable is left. Transitions are crossfades or cuts only.`;
+Rules: total about ${pol.target_s}s (usable footage ${pol.usable_s}s; up to ${pol.max_s}s only if there is enough good footage; never over 30s; at least ${pol.floor_s}s when the footage allows). Never slow clips down or hold frames just to reach a length; a shorter reel is fine when footage is thin. Use every clip that has usable footage (a short 1.5-2.5s beat is fine) as long as the total stays within the limit. Never put a reveal clip below speed 1.0. Story order; the reveal last and longest; cuts on beats; first segment transition_in is "cut". Never use any part of a clip inside its avoid_ranges_s (garbled text, blur); skip a clip if nothing usable is left. Transitions are crossfades or cuts only.`;
 }
 // Lengthen a segment by `src` seconds of source footage: first past its out point, then before its in point (within unflagged footage).
 function grow(s, src) {
@@ -256,18 +266,21 @@ function cleanEdit(j, { shots, clips, qc, music }) {
   }
   // the AI sometimes returns too few segments (or skips usable clips): fill from the remaining usable clips (story order, reveal last), at normal speed
   const order = Object.fromEntries((shots || []).map((sh, i) => [sh.id, (sh.type === 'reveal' ? 1000 : 0) + i]));
-  const fillOne = () => {
+  const fillOne = (maxLen = Infinity) => {
     const have = new Set(segs.map(x => x.shot_id));
     for (const sh of shots || []) {
       const c = clips[sh.id]; if (!c || have.has(sh.id) || dropped.some(d => d.shot_id === sh.id)) continue;
       const q = qcBy[sh.id] || {}; if (q.has_haircut === false) continue;
       const w = freeWindow(0, c.duration, avoidRanges(q)); if (!w || w[1] - w[0] < 0.8) continue;
       const pref = q.best && q.best.end_s - q.best.start_s >= 0.8 ? freeWindow(q.best.start_s, q.best.end_s, avoidRanges(q)) : null;
-      const [a, b] = pref && pref[1] - pref[0] >= 0.8 ? pref : w;
+      let [a, b] = pref && pref[1] - pref[0] >= 0.8 ? pref : w;
+      if (b - a > maxLen) { const mid = (a + b) / 2; a = Math.max(w[0], mid - maxLen / 2); b = Math.min(w[1], a + maxLen); }
       const seg = { shot_id: sh.id, in_s: r2(a), out_s: r2(b), min_in: r2(w[0]), max_out: r2(w[1]), speed: 1, ramp_to: null, zoom: { type: 'none', at_s: 0, scale: 1 },
         transition_in: { type: 'fade', duration: 0.4 }, filled: true };
       // insert in story order (before the first planned segment that comes later in the shot list)
-      const k = segs.findIndex(x => (order[x.shot_id] ?? 500) > (order[sh.id] ?? 500)); segs.splice(k < 0 ? segs.length : k, 0, seg);
+      let k = segs.findIndex(x => (order[x.shot_id] ?? 500) > (order[sh.id] ?? 500)); if (k < 0) k = segs.length;
+      if (segs.length >= 2 && k >= segs.length) k = segs.length - 1; // the planned final clip (the reveal) stays last
+      segs.splice(k, 0, seg);
       segs.forEach((x, i) => { if (!i) x.transition_in = { type: 'cut', duration: x.transition_in.duration }; else if (x.transition_in.type === 'cut' && x.filled) x.transition_in.type = 'fade'; });
       return true;
     }
@@ -275,6 +288,13 @@ function cleanEdit(j, { shots, clips, qc, music }) {
   };
   while (segs.length < 2 && fillOne());
   if (segs.length < 2) throw new Error('Edit plan needs at least 2 usable clips' + (dropped.length ? ' (QC removed: ' + dropped.map(d => d.shot_id).join(', ') + ')' : ''));
+  // no slow-mo on reveals: a reveal clip (type reveal, or the final clip) never plays below 1.0x
+  const typeOf = id => (shots || []).find(x => x.id === id)?.type;
+  const revealClamped = [];
+  const clampReveal = () => segs.forEach((x, i) => { if (typeOf(x.shot_id) !== 'reveal' && i !== segs.length - 1) return;
+    if (x.speed < 1 || (x.ramp_to && x.ramp_to < 1)) { revealClamped.push({ shot_id: x.shot_id, speed: x.speed, ramp_to: x.ramp_to });
+      x.speed = Math.max(1, x.speed); x.ramp_to = x.ramp_to ? Math.max(1, x.ramp_to) : null; if (x.ramp_to === x.speed) x.ramp_to = null; } });
+  clampReveal();
   const outDur = s => { const len = s.out_s - s.in_s; return s.ramp_to ? len / 2 / s.speed + len / 2 / s.ramp_to : len / s.speed; };
   const pol = durationPolicy(usableSeconds(clips, qc));
   // over the allowed max: trim every clip proportionally (speeds untouched)
@@ -288,6 +308,18 @@ function cleanEdit(j, { shots, clips, qc, music }) {
   // still under the floor with every planned clip at full length: bring in usable clips the planner skipped (real footage, normal speed)
   while (layout(segs, outDur).total < pol.floor_s - 0.05 && segs.length < 8 && fillOne())
     for (const s of [...segs].reverse()) { const need = pol.target_s - layout(segs, outDur).total; if (need <= 0.05) break; if (s.filled) grow(s, need); }
+  // prefer using every usable clip: add each one the planner skipped as a short real-speed beat (<= 2.5s) while the reel stays within max
+  const included = [];
+  while (segs.length < 8 && layout(segs, outDur).total + 1.6 <= pol.max_s) {
+    const before = segs.map(x => x.shot_id).join(); const room = pol.max_s - layout(segs, outDur).total;
+    if (!fillOne(Math.min(2.5, room + 0.3))) break;
+    const nu = segs.find(x => !before.split(',').includes(x.shot_id)); if (nu) included.push(nu.shot_id);
+  }
+  clampReveal();
+  // drop sync: with a track that has a drop, the reveal comes in on a hard cut (set before beat snapping so the cut sits on the grid);
+  // musicStart() then puts the drop exactly on that cut
+  const hasDrop = music && music !== 'none' && MUSIC.dropFor(music) != null;
+  if (hasDrop && segs.length > 1) segs[segs.length - 1].transition_in = { type: 'cut', duration: 0 };
   const timeline = layout(segs, outDur);
   // snap transition starts to beats (adjust previous segment's out point)
   const beats = beatGrid(music, timeline.total);
@@ -303,16 +335,19 @@ function cleanEdit(j, { shots, clips, qc, music }) {
   if (layout(segs, outDur).total > pol.cap_s) throw new Error('Edit plan over 30s');
   const tl = layout(segs, outDur); const added = segs.filter(x => x.filled).map(x => x.shot_id); segs.forEach(x => { delete x.max_out; delete x.min_in; delete x.filled; });
   return { segments: segs, timeline: tl.starts.map((st, i) => ({ shot_id: segs[i].shot_id, start_s: r2(st), end_s: r2(st + tl.durs[i]) })), total: r2(tl.total),
-    beat_markers: beats.filter(b => b <= tl.total), ...musicStart(j.music_start_s, music, tl.starts[tl.starts.length - 1]), track: music,
-    duration_policy: pol,
+    beat_markers: beats.filter(b => b <= tl.total), ...musicStart(j.music_start_s, music, r2(tl.starts[tl.starts.length - 1]), tl.total), track: music,
+    duration_policy: pol, reveal_speed_clamped: revealClamped, included_unused: included,
     added_for_length: added, qc_enforced: { dropped, trimmed: segs.filter(x => avoidRanges(qcBy[x.shot_id]).length).map(x => x.shot_id), cropped: segs.filter(x => qcBy[x.shot_id]?.crop).map(x => x.shot_id) } };
 }
-// Default music start: put the track's drop on the reveal (last clip) start. Beat-aligned excerpts start on a beat, the drop is
-// on a beat and the reveal start is snapped to the beat grid, so the result stays on the grid. Falls back to the planner's value.
-function musicStart(planned, track, revealStart) {
+// Drop sync (deterministic): the reveal's hard cut shows on the first output frame at/after its start (30 fps), so music_start_s is
+// set to drop_s - cut time exactly (ms precision, no beat rounding). The excerpts are beat-aligned and the cut is beat-snapped, so the
+// beat grid still holds. Falls back to the planner's value (beat-snapped) when the drop can't land inside the reel.
+const FPS = 30;
+const frameCeil = t => Math.ceil(t * FPS - 1e-6) / FPS;
+function musicStart(planned, track, revealStart, total = 30) {
   const drop = MUSIC.dropFor(track), dur = MUSIC.TRACKS[MUSIC.resolve(track)]?.duration_s || 60, p = 60 / MUSIC.bpmFor(track);
-  if (drop != null && track !== 'none') { let ms = drop - revealStart; ms = Math.round(ms / p) * p;
-    if (ms >= 0 && ms <= dur - 31) return { music_start_s: r2(ms), music_start_source: 'drop', music_drop_at_s: r2(drop - ms) }; }
+  if (drop != null && track !== 'none' && revealStart != null) { const cut = frameCeil(revealStart), ms = Math.round((drop - cut) * 1000) / 1000;
+    if (ms >= 0 && ms + total <= dur - 0.5) return { music_start_s: ms, music_start_source: 'drop', music_drop_at_s: Math.round(cut * 1000) / 1000, reveal_cut_s: Math.round(cut * 1000) / 1000 }; }
   const ms = Math.round(clamp(planned, 0, 20) / p) * p;
   return { music_start_s: r2(ms), music_start_source: 'plan' };
 }
@@ -333,9 +368,35 @@ function clipWindows(timeline, total) {
   return timeline.map((t, i) => ({ clip: i + 1, shot_id: t.shot_id,
     start_s: r2(i ? (t.start_s + timeline[i - 1].end_s) / 2 : 0), end_s: r2(i < timeline.length - 1 ? (timeline[i + 1].start_s + t.end_s) / 2 : (total ?? t.end_s)) }));
 }
+// Real playback speed of each on-screen clip, as the caption writer must describe it.
+function playbackOf(seg) {
+  const rates = [seg?.speed || 1, ...(seg?.ramp_to ? [seg.ramp_to] : [])];
+  const lo = Math.min(...rates), hi = Math.max(...rates);
+  return { speed: seg?.ramp_to ? `${lo}-${hi}x` : `${seg?.speed || 1}x`, playback: hi > 1.02 && lo < 0.98 ? 'speed ramp' : hi > 1.02 ? 'sped up' : lo < 0.98 ? 'slow motion' : 'normal speed', lo, hi };
+}
 function breakdownFor(edit, qc) {
-  return clipWindows(edit.timeline, edit.total).map(w => ({ clip: w.clip, start_s: w.start_s, end_s: w.end_s,
-    what_is_visible: qc.clips.find(c => c.shot_id === w.shot_id)?.what_is_visible || w.shot_id }));
+  return clipWindows(edit.timeline, edit.total).map((w, i) => { const pb = playbackOf(edit.segments?.[i]);
+    return { clip: w.clip, start_s: w.start_s, end_s: w.end_s, speed: pb.speed, playback: pb.playback,
+      what_is_visible: qc.clips.find(c => c.shot_id === w.shot_id)?.what_is_visible || w.shot_id }; });
+}
+// Captions must not claim a speed the clip doesn't have: no "slow" over a clip faster than 1.0x, no "fast/quick" over one slower.
+const SLOW_RX = /\b(?:in\s+)?(?:slow[\s-]?mo(?:tion)?|slow(?:ly|ed|ing)?|unhurried|leisurely|lingering)\b/gi;
+const FAST_RX = /\b(?:fast(?:er)?|quick(?:ly|er)?|rapid(?:ly)?|speedy|sped[\s-]up|speed(?:ed)?[\s-]up|in\s+a\s+flash|whip(?:-fast)?|zippy|swift(?:ly)?)\b/gi;
+function tidy(t) {
+  let x = t.replace(/\s{2,}/g, ' ').replace(/\s+([,!?.:;])/g, '$1').replace(/^[\s,;:-]+|[\s,;:-]+$/g, '').replace(/,\s*,/g, ',').replace(/\(\s*\)/g, '').trim();
+  x = x.replace(/^(?:a|an|the|and|with)\s+(?=[,!?]|$)/i, '').trim();
+  return x ? x[0].toUpperCase() + x.slice(1) : x;
+}
+function fixSpeedClaims(lines, edit) {
+  const fixes = [];
+  const out = (lines || []).map(l => { const seg = edit.segments?.[(l.clip || 1) - 1], pb = playbackOf(seg); let t = String(l.text || '');
+    const rx = pb.hi > 1.02 && pb.lo >= 0.98 ? SLOW_RX : pb.lo < 0.98 && pb.hi <= 1.02 ? FAST_RX : pb.hi > 1.02 && pb.lo < 0.98 ? null : null;
+    // normal speed: neither "slow-mo" nor "sped up" is true; plain "slow"/"quick" motion words are left alone
+    const rxNormal = /\b(?:in\s+)?(?:slow[\s-]?mo(?:tion)?|sped[\s-]up|speed(?:ed)?[\s-]up|time[\s-]?lapse)\b/gi;
+    const use = rx || (pb.hi <= 1.02 && pb.lo >= 0.98 ? rxNormal : null);
+    if (use && use.test(t)) { use.lastIndex = 0; const nt = tidy(t.replace(use, ' ')); fixes.push({ clip: l.clip, speed: pb.speed, from: t, to: nt || 'The finish, up close' }); t = nt || 'The finish, up close'; }
+    return { ...l, text: t, speed: pb.speed }; });
+  return { lines: out, fixes };
 }
 // Snap script lines to the clip actually on screen. Uses line.clip (1-based) when the writer gave it, else max time overlap.
 // The last line is the CTA and sits at the end of the final clip. Every line gets >= 1.0s.
@@ -421,5 +482,5 @@ function haircutOverride(body, qc, now = new Date()) {
   return { gate: 'no_haircut', confirmed: true, statement: 'Salon owner confirmed the finished cut is clearly visible in the real footage.',
     reason: String(o.reason || '').slice(0, 300), by: String(o.by || 'salon owner').slice(0, 80), at: now.toISOString(), qc_overall: qc.overall || '' };
 }
-module.exports = { DURATION, usableSeconds, durationPolicy, musicStart, TRANSITIONS, normTransition, PROCESS_TYPES, cleanFlags, avoidRanges, freeWindow, barsFromRows, analyzeBars, shortSummary, clipWindows, alignOverlays, captionFrameStamps, validateOverlays, xfadePlan, layout, haircutOverride, STYLES, MOODS, TRACK_BPM, shotPrompt, cleanShots, mockShots, splitPrompt, cleanSplit, mockSplit, qcPrompt, cleanQC, mockQC, gapReport,
-  editPrompt, cleanEdit, mockEdit, breakdownFor, segFilter, ffEsc, beatGrid };
+module.exports = { addShot, DURATION, usableSeconds, durationPolicy, musicStart, TRANSITIONS, normTransition, PROCESS_TYPES, cleanFlags, avoidRanges, freeWindow, barsFromRows, analyzeBars, shortSummary, clipWindows, alignOverlays, captionFrameStamps, validateOverlays, xfadePlan, layout, haircutOverride, STYLES, MOODS, TRACK_BPM, shotPrompt, cleanShots, mockShots, splitPrompt, cleanSplit, mockSplit, qcPrompt, cleanQC, mockQC, gapReport,
+  editPrompt, cleanEdit, mockEdit, breakdownFor, playbackOf, fixSpeedClaims, frameCeil, FPS, segFilter, ffEsc, beatGrid };

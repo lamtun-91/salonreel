@@ -41,7 +41,7 @@ function copyPrompt({ look, tone, profile, duration }) {
     salon_name: none(p.salon), tone: String(tone || 'luxe').toLowerCase(), brand_notes: none(p.brandNotes),
     stylist_name: none(p.stylist), services: none(p.services), booking_cta: String(p.booking || '').trim() || 'Book via link in bio',
     city_tag: cityTag(p.city), language: String(p.language || '').trim() || 'English',
-    clip_breakdown: JSON.stringify((look.clip_breakdown || []).map(({ clip, start_s, end_s, what_is_visible }) => ({ ...(clip ? { clip } : {}), start_s, end_s, what_is_visible }))),
+    clip_breakdown: JSON.stringify((look.clip_breakdown || []).map(({ clip, start_s, end_s, what_is_visible, speed, playback }) => ({ ...(clip ? { clip } : {}), start_s, end_s, ...(speed ? { speed, playback } : {}), what_is_visible }))),
   };
   const filled = scriptPrompt().replace(/\{(\w+)\}/g, (m, k) => k in vars ? vars[k] : m);
   return `${filled}
@@ -51,6 +51,7 @@ ADDITIONAL RULES
 - Script lines: no emoji (emoji in the caption only as the voice allows).
 - If the clip breakdown shows no finished haircut, return exactly {"error":"no_haircut"}.${(look.clip_breakdown || []).some(c => c.clip) ? `
 - The clip breakdown is the final edit, one entry per clip in on-screen order. Give every script line a "clip" number (the clip it appears over) and describe only what that clip shows; the server times each line to its clip. Use clips in order; the CTA line goes on the last clip.` : ''}
+- Each clip's "speed"/"playback" is how it really plays in the edit. Never claim a speed it doesn't have: no "slow"/"slow-mo" over a sped-up clip (above 1x), no "fast"/"quick" over a slow-motion clip (below 1x), and no "slow-mo" over a normal-speed clip.
 - Make each line specific and punchy: name a visible detail (the cut, the color, the line, the texture, the movement). No generic filler such as "Posed in the salon", "Looking good", "The final look". No trailing period.`;
 }
 function cleanSegments(segs, duration, key) {
