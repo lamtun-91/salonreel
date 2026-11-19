@@ -24,10 +24,11 @@
    "bpm": 105.0,
    "beat_offset_s": 0.0,
    "bpm_check": 105.0,
-   "drop_s": 18.0,
+   "drop_s": 18.31,
    "drop_confidence": 0.61,
    "file": "music/confident-glow.m4a",
-   "vocals": "none tagged on source page (instrument tags: bass, drums)"
+   "vocals": "none tagged on source page (instrument tags: bass, drums)",
+   "drop_method": "onset-refined: steepest 5ms rise of <150Hz energy within 0.75s of the coarse drop (edm/drop_analysis.py)"
   },
   {
    "id": "sun-kissed",
@@ -51,10 +52,11 @@
    "bpm": 100.0,
    "beat_offset_s": 0.0,
    "bpm_check": 100.0,
-   "drop_s": 8.95,
+   "drop_s": 9.005,
    "drop_confidence": 0.66,
    "file": "music/sun-kissed.m4a",
-   "vocals": "none tagged on source page (instrument tags: acoustic-guitar, bass)"
+   "vocals": "none tagged on source page (instrument tags: acoustic-guitar, bass)",
+   "drop_method": "onset-refined: steepest 5ms rise of <150Hz energy within 0.75s of the coarse drop (edm/drop_analysis.py)"
   },
   {
    "id": "golden-hour",
@@ -78,10 +80,11 @@
    "bpm": 127.0,
    "beat_offset_s": 0.0,
    "bpm_check": 127.0,
-   "drop_s": 14.99,
+   "drop_s": 15.125,
    "drop_confidence": 0.5,
    "file": "music/golden-hour.m4a",
-   "vocals": "none tagged on source page (instrument tags: bass, drums)"
+   "vocals": "none tagged on source page (instrument tags: bass, drums)",
+   "drop_method": "onset-refined: steepest 5ms rise of <150Hz energy within 0.75s of the coarse drop (edm/drop_analysis.py)"
   },
   {
    "id": "velvet-house",
@@ -105,10 +108,11 @@
    "bpm": 122.0,
    "beat_offset_s": 0.488,
    "bpm_check": 122.0,
-   "drop_s": 20.16,
+   "drop_s": 20.18,
    "drop_confidence": 0.66,
    "file": "music/velvet-house.m4a",
-   "vocals": "none tagged on source page (instrument tags: bass, drums)"
+   "vocals": "none tagged on source page (instrument tags: bass, drums)",
+   "drop_method": "onset-refined: steepest 5ms rise of <150Hz energy within 0.75s of the coarse drop (edm/drop_analysis.py)"
   },
   {
    "id": "one-more-dance",
@@ -132,10 +136,11 @@
    "bpm": 110.0,
    "beat_offset_s": 0.0,
    "bpm_check": 110.0,
-   "drop_s": 20.18,
+   "drop_s": 19.39,
    "drop_confidence": 0.56,
    "file": "music/one-more-dance.m4a",
-   "vocals": "none tagged on source page (instrument tags: bass, drums)"
+   "vocals": "none tagged on source page (instrument tags: bass, drums)",
+   "drop_method": "onset-refined: steepest 5ms rise of <150Hz energy within 0.75s of the coarse drop (edm/drop_analysis.py)"
   },
   {
    "id": "take-it-higher",
@@ -159,10 +164,11 @@
    "bpm": 124.0,
    "beat_offset_s": 0.0,
    "bpm_check": 124.0,
-   "drop_s": 20.06,
+   "drop_s": 20.34,
    "drop_confidence": 0.6,
    "file": "music/take-it-higher.m4a",
-   "vocals": "none tagged on source page (instrument tags: bass, drums)"
+   "vocals": "none tagged on source page (instrument tags: bass, drums)",
+   "drop_method": "onset-refined: steepest 5ms rise of <150Hz energy within 0.75s of the coarse drop (edm/drop_analysis.py)"
   },
   {
    "id": "green-chair",
@@ -213,10 +219,11 @@
    "bpm": 82.0,
    "beat_offset_s": 0.279,
    "bpm_check": 168.1,
-   "drop_s": 20.02,
+   "drop_s": 20.505,
    "drop_confidence": 0.4,
    "file": "music/lofi-salon.m4a",
-   "vocals": "none tagged on source page (instrument tags: bass, drums)"
+   "vocals": "none tagged on source page (instrument tags: bass, drums)",
+   "drop_method": "onset-refined: steepest 5ms rise of <150Hz energy within 0.75s of the coarse drop (edm/drop_analysis.py)"
   },
   {
    "id": "head-turner",
@@ -240,10 +247,11 @@
    "bpm": 93.3,
    "beat_offset_s": 0.0,
    "bpm_check": 93.3,
-   "drop_s": 13.06,
+   "drop_s": 12.625,
    "drop_confidence": 0.62,
    "file": "music/head-turner.m4a",
-   "vocals": "none tagged on source page (instrument tags: bass, drums)"
+   "vocals": "none tagged on source page (instrument tags: bass, drums)",
+   "drop_method": "onset-refined: steepest 5ms rise of <150Hz energy within 0.75s of the coarse drop (edm/drop_analysis.py)"
   },
   {
    "id": "after-dark",
@@ -267,16 +275,17 @@
    "bpm": 120.0,
    "beat_offset_s": 0.0,
    "bpm_check": 120.0,
-   "drop_s": 20.0,
+   "drop_s": 20.03,
    "drop_confidence": 0.73,
    "file": "music/after-dark.m4a",
-   "vocals": "none tagged on source page (instrument tags: bass, drums)"
+   "vocals": "none tagged on source page (instrument tags: bass, drums)",
+   "drop_method": "onset-refined: steepest 5ms rise of <150Hz energy within 0.75s of the coarse drop (edm/drop_analysis.py)"
   },
   {
    "id": "house-reveal",
    "label": "House Reveal",
    "title": "House Vibes",
-   "artist": "Alejandro Magaña (A. M.)",
+   "artist": "Alejandro Maga\u00f1a (A. M.)",
    "mood": "edm",
    "genre": "house",
    "style": "house",
@@ -294,10 +303,11 @@
    "bpm": 120.0,
    "beat_offset_s": 0.499,
    "bpm_check": 120.0,
-   "drop_s": 15.88,
+   "drop_s": 16.015,
    "drop_confidence": 0.78,
    "file": "music/house-reveal.m4a",
-   "vocals": "none tagged on source page (instrument tags: bass, drums)"
+   "vocals": "none tagged on source page (instrument tags: bass, drums)",
+   "drop_method": "onset-refined: steepest 5ms rise of <150Hz energy within 0.75s of the coarse drop (edm/drop_analysis.py)"
   },
   {
    "id": "future-glow",
@@ -321,10 +331,11 @@
    "bpm": 75.0,
    "beat_offset_s": 0.795,
    "bpm_check": 75.0,
-   "drop_s": 19.89,
+   "drop_s": 20.015,
    "drop_confidence": 0.49,
    "file": "music/future-glow.m4a",
-   "vocals": "none tagged on source page (instrument tags: bass, drums)"
+   "vocals": "none tagged on source page (instrument tags: bass, drums)",
+   "drop_method": "onset-refined: steepest 5ms rise of <150Hz energy within 0.75s of the coarse drop (edm/drop_analysis.py)"
   },
   {
    "id": "melodic-lift",
@@ -348,16 +359,17 @@
    "bpm": 122.0,
    "beat_offset_s": 0.0,
    "bpm_check": 122.0,
-   "drop_s": 20.2,
+   "drop_s": 20.675,
    "drop_confidence": 0.68,
    "file": "music/melodic-lift.m4a",
-   "vocals": "none tagged on source page (instrument tags: bass, drums)"
+   "vocals": "none tagged on source page (instrument tags: bass, drums)",
+   "drop_method": "onset-refined: steepest 5ms rise of <150Hz energy within 0.75s of the coarse drop (edm/drop_analysis.py)"
   },
   {
    "id": "tech-cut",
    "label": "Tech Cut",
    "title": "Minimal Techno 01",
-   "artist": "Alejandro Magaña (A. M.)",
+   "artist": "Alejandro Maga\u00f1a (A. M.)",
    "mood": "edm",
    "genre": "tech-house",
    "style": "tech house",
