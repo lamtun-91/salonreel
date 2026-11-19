@@ -41,7 +41,7 @@ function copyPrompt({ look, tone, profile, duration }) {
     salon_name: none(p.salon), tone: String(tone || 'luxe').toLowerCase(), brand_notes: none(p.brandNotes),
     stylist_name: none(p.stylist), services: none(p.services), booking_cta: String(p.booking || '').trim() || 'Book via link in bio',
     city_tag: cityTag(p.city), language: String(p.language || '').trim() || 'English',
-    clip_breakdown: JSON.stringify((look.clip_breakdown || []).map(({ start_s, end_s, what_is_visible }) => ({ start_s, end_s, what_is_visible }))),
+    clip_breakdown: JSON.stringify((look.clip_breakdown || []).map(({ clip, start_s, end_s, what_is_visible }) => ({ ...(clip ? { clip } : {}), start_s, end_s, what_is_visible }))),
   };
   const filled = scriptPrompt().replace(/\{(\w+)\}/g, (m, k) => k in vars ? vars[k] : m);
   return `${filled}
@@ -49,7 +49,9 @@ function copyPrompt({ look, tone, profile, duration }) {
 ADDITIONAL RULES
 - Clip duration: ${d}s. Every script line's start_s and end_s must be within 0..${d}, in order, non-overlapping, each at least 1.0s long.
 - Script lines: no emoji (emoji in the caption only as the voice allows).
-- If the clip breakdown shows no finished haircut, return exactly {"error":"no_haircut"}.`;
+- If the clip breakdown shows no finished haircut, return exactly {"error":"no_haircut"}.${(look.clip_breakdown || []).some(c => c.clip) ? `
+- The clip breakdown is the final edit, one entry per clip in on-screen order. Give every script line a "clip" number (the clip it appears over) and describe only what that clip shows; the server times each line to its clip. Use clips in order; the CTA line goes on the last clip.` : ''}
+- Make each line specific and punchy: name a visible detail (the cut, the color, the line, the texture, the movement). No generic filler such as "Posed in the salon", "Looking good", "The final look". No trailing period.`;
 }
 function cleanSegments(segs, duration, key) {
   if (!Array.isArray(segs)) return [];
@@ -100,15 +102,32 @@ function mockCopy(look, tone, p, duration) {
 }
 
 // ---- ASS captions with explicit timings ----
+// Screen zones (1080x1920), kept inside the Instagram Reels safe area (top ~14% and bottom ~35% are covered by app UI,
+// right ~120px by the action buttons). Salon name sits in a top band; captions in a separate lower band with a backing box.
+const BRAND_ZONE = { topY: 285, size: 46 };            // brand text top edge at y=285
+const CAPTION_ZONE = { bottomY: 1230, size: 66, marginL: 90, marginR: 160 }; // caption box bottom edge at y=1230
 const assEsc = s => noEmoji(s).replace(/[{}\\]/g, '').replace(/\n/g, ' ');
 const ts = s => { const h = s / 3600 | 0, m = (s % 3600) / 60 | 0, sec = (s % 60).toFixed(2).padStart(5, '0'); return `${h}:${String(m).padStart(2, '0')}:${sec}`; };
 function buildAss({ lines, salon, duration, tone }) {
   const font = tone === 'luxe' ? 'DejaVu Serif' : 'DejaVu Sans';
   let out = `[Script Info]\nScriptType: v4.00+\nPlayResX: 1080\nPlayResY: 1920\nWrapStyle: 0\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Cap,${font},78,&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,1,${tone === 'luxe' ? 1 : 0},0,0,100,100,0,0,1,4,3,2,80,80,380,1
-Style: Brand,DejaVu Sans,54,&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,1,0,0,0,100,100,2,0,1,3,2,7,70,70,110,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n`;
+Style: Cap,${font},${CAPTION_ZONE.size},&H00FFFFFF,&H00FFFFFF,&H50000000,&H50000000,1,${tone === 'luxe' ? 1 : 0},0,0,100,100,0,0,3,14,0,2,${CAPTION_ZONE.marginL},${CAPTION_ZONE.marginR},${1920 - CAPTION_ZONE.bottomY},1
+Style: Brand,DejaVu Sans,${BRAND_ZONE.size},&H00FFFFFF,&H00FFFFFF,&H00000000,&H78000000,1,0,0,0,100,100,4,0,1,3,3,8,90,90,${BRAND_ZONE.topY},1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n`;
   out += `Dialogue: 0,${ts(0)},${ts(duration)},Brand,,0,0,0,,${assEsc(salon)}\n`;
   for (const l of lines) out += `Dialogue: 1,${ts(l.start_s)},${ts(l.end_s)},Cap,,0,0,0,,{\\fad(250,250)}${assEsc(l.text)}\n`;
   return out;
 }
-module.exports = { visionSystem, visionPrompt, cleanLook, copySystem, copyPrompt, cleanCopy, cleanSegments, autoTime, mockLook, mockCopy, buildAss, noEmoji };
+// Vision context for caption writing: keyframes from the final edit, in on-screen order.
+function visionCaptionAddendum(frameMap) {
+  let n = 0;
+  const lines = frameMap.map(c => `- clip ${c.clip} (on screen ${c.start_s.toFixed(1)}-${c.end_s.toFixed(1)}s): image${c.frames.length > 1 ? 's' : ''} ${c.frames.map(() => '#' + (++n)).join(', ')}`);
+  return `
+
+FINAL EDIT KEYFRAMES
+The attached images are keyframes from the FINAL edit, in on-screen order, taken from the part of each clip that is actually used:
+${lines.join('\n')}
+- Write each script line for the clip it appears over, based on what those images show (the cut, the color, the shape, the movement, the expression). Use the "clip" field; the line's start_s/end_s must fall inside that clip's on-screen window.
+- Be specific and punchy, like a stylist talking: "Soft balayage, lit from within" beats "Posed in the salon." Never just describe the camera or the pose.
+- If the images and the clip breakdown disagree, trust the images.`;
+}
+module.exports = { visionCaptionAddendum, BRAND_ZONE, CAPTION_ZONE, visionSystem, visionPrompt, cleanLook, copySystem, copyPrompt, cleanCopy, cleanSegments, autoTime, mockLook, mockCopy, buildAss, noEmoji };
