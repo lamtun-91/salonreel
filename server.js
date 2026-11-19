@@ -53,7 +53,7 @@ async function llm(opts) {
   catch (e) { if (opts.retry === false || !/fetch failed|ETIMEDOUT|ECONNRESET|socket|aborted|timeout/i.test(String(e.message) + String(e.cause?.code || ''))) throw e;
     console.error('AI call failed, retrying once:', e.message); return llmOnce(opts); }
 }
-async function llmOnce({ system, text, images = [], timeoutMs, detail = 'high' }) {
+async function llmOnce({ system, text, images = [], timeoutMs, detail = 'high', effort }) {
   const signal = AbortSignal.timeout(timeoutMs || +process.env.LLM_TIMEOUT_MS || 150000);
   const c = cfg();
   if (c.provider === 'claude') {
@@ -67,8 +67,10 @@ async function llmOnce({ system, text, images = [], timeoutMs, detail = 'high' }
   const content = [...images.map(b64 => ({ type: 'image_url', image_url: { url: 'data:image/jpeg;base64,' + b64, detail } })), { type: 'text', text }];
   const r = await fetch('https://api.x.ai/v1/chat/completions', { method: 'POST',
     headers: { Authorization: 'Bearer ' + process.env.XAI_API_KEY, 'content-type': 'application/json' },
-    body: JSON.stringify({ model: c.xaiModel, messages: [{ role: 'system', content: system }, { role: 'user', content }] }), signal });
-  const j = await r.json(); if (!r.ok) throw new Error('AI: ' + JSON.stringify(j.error || j));
+    body: JSON.stringify({ model: c.xaiModel, ...(effort ? { reasoning_effort: effort } : {}), messages: [{ role: 'system', content: system }, { role: 'user', content }] }), signal });
+  const j = await r.json();
+  if (!r.ok && effort && /reasoning/i.test(JSON.stringify(j))) return llmOnce({ system, text, images, timeoutMs, detail }); // model without effort control
+  if (!r.ok) throw new Error('AI: ' + JSON.stringify(j.error || j));
   return j.choices[0].message.content;
 }
 const parseJSON = s => JSON.parse(s.slice(s.indexOf('{'), s.lastIndexOf('}') + 1));

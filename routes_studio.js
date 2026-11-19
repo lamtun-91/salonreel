@@ -277,7 +277,7 @@ module.exports = ({ app, llm, parseJSON, run, probe, cfg, TRACKS, D, id, wrap })
     if (!p.gaps?.ready && !q.body.force) throw new Error('Fix the gap report first (missing/reshoot shots), or continue anyway');
     const ctx = { shots: p.plan.shots, clips: p.clips, qc: p.qc, mood: p.inputs.mood, music: p.inputs.music, style: p.inputs.style };
     if (live()) {
-      const raw = parseJSON(await llm({ system: 'You are a short-form video editor. Reply with JSON only.', text: S.editPrompt(ctx) }));
+      const raw = parseJSON(await llm({ system: 'You are a short-form video editor. Reply with JSON only.', effort: 'low', text: S.editPrompt(ctx) }) /* low effort: ~30s instead of ~140s; the server clamps the plan anyway */);
       console.log('edit plan from AI:', (raw.segments || []).map(x => x.shot_id + ' ' + x.in_s + '-' + x.out_s + ' x' + x.speed).join(' | '));
       p.edit = S.cleanEdit(raw, ctx);
     } else p.edit = S.mockEdit(ctx);
@@ -299,7 +299,7 @@ module.exports = ({ app, llm, parseJSON, run, probe, cfg, TRACKS, D, id, wrap })
         }
       } catch (e) { visionErr = 'frames: ' + e.message; images = []; }
       if (images.length) {
-        try { copy = P.cleanCopy(parseJSON(await llm({ system: P.copySystem, images, detail: 'low', timeoutMs: +process.env.VISION_TIMEOUT_MS || 180000, retry: false, text: text + P.visionCaptionAddendum(frameMap) })), p.edit.total); if (copy.error) throw new Error(copy.error); copy.mode = 'vision'; }
+        try { copy = P.cleanCopy(parseJSON(await llm({ system: P.copySystem, images, detail: 'low', effort: 'low', timeoutMs: +process.env.VISION_TIMEOUT_MS || 180000, retry: false, text: text + P.visionCaptionAddendum(frameMap) })), p.edit.total); if (copy.error) throw new Error(copy.error); copy.mode = 'vision'; }
         catch (e) { visionErr = 'vision: ' + String(e.message).slice(0, 200); copy = null; }
       }
       if (!copy || copy.error === undefined && !copy.script?.length) { copy = P.cleanCopy(parseJSON(await llm({ system: P.copySystem, text })), p.edit.total); copy.mode = 'text'; }
