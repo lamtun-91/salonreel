@@ -170,3 +170,23 @@ test('validateOverlays flags windows outside clip bounds or overlapping', () => 
   const bad = S.validateOverlays([{ text: 'x', start_s: 3, end_s: 7, clip: 1 }, { text: 'y', start_s: 6.5, end_s: 9, clip: 2 }], edit);
   assert.equal(bad.ok, false); assert.equal(bad.problems.length, 2);
 });
+
+// ---- #10 duration policy ----
+test('duration policy: ~18s default, stretch to <=25s with plenty of usable footage, never pads with slow-mo', () => {
+  assert.equal(S.durationPolicy(20).max_s, 18); assert.equal(S.durationPolicy(60).max_s, 25);
+  const mk = (n, d, flags = {}) => { const clips = {}, qc = { clips: [] };
+    for (let i = 1; i <= n; i++) { clips['s' + i] = { duration: d, src_start: 0 }; qc.clips.push({ shot_id: 's' + i, flags: flags['s' + i] || [] }); } return { clips, qc }; };
+  const plan = (n, len, speed = 1) => ({ segments: Array.from({ length: n }, (_, i) => ({ shot_id: 's' + (i + 1), in_s: 0, out_s: len, speed, transition_in: { type: i ? 'fade' : 'cut', duration: 0.4 } })) });
+  // plenty of footage, LLM over-long plan -> clamped to <= 25
+  let { clips, qc } = mk(6, 12); let e = S.cleanEdit(plan(6, 8), { clips, qc, music: 'velvet-house' });
+  assert.ok(e.total <= 25.05 && e.total >= 15, String(e.total)); assert.equal(e.duration_policy.max_s, 25);
+  // moderate footage, short plan -> grown toward ~18 from real footage at the same speed
+  ({ clips, qc } = mk(4, 6)); e = S.cleanEdit(plan(4, 2.5), { clips, qc, music: 'velvet-house' });
+  assert.ok(e.total >= 15 && e.total <= 18.6, String(e.total)); assert.ok(e.segments.every(s => s.speed === 1));
+  // thin footage: shorter reel is fine; no slow-mo added
+  ({ clips, qc } = mk(3, 3)); e = S.cleanEdit(plan(3, 3), { clips, qc, music: 'velvet-house' });
+  assert.ok(e.total < 15, String(e.total)); assert.ok(e.segments.every(s => s.speed === 1 && s.out_s <= 3));
+  // flagged time is not usable
+  assert.equal(S.usableSeconds({ a: { duration: 5 }, b: { duration: 5 } }, { clips: [{ shot_id: 'b', flags: [{ kind: 'text_overlay', start_s: 0, end_s: 5 }] }] }), 5);
+  assert.match(S.editPrompt({ shots: [{ id: 's1', name: 'a', type: 'reveal' }], clips: { s1: { duration: 6 } }, qc: { clips: [] }, mood: 'Luxe', music: 'velvet-house', style: 'Reveal-only' }), /about 18s/);
+});

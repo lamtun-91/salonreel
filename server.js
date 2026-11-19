@@ -47,20 +47,27 @@ async function probe(f) {
 const videoPath = vid => { if (!/^[\w.-]+$/.test(vid)) throw new Error('bad id'); const f = D('uploads', vid); if (!fs.existsSync(f)) throw new Error('video not found'); return f; };
 
 // ---------- LLM ----------
-async function llm({ system, text, images = [] }) {
+// Every AI call has a timeout (a hung connection used to stall a job for minutes) and one retry on network errors.
+async function llm(opts) {
+  try { return await llmOnce(opts); }
+  catch (e) { if (opts.retry === false || !/fetch failed|ETIMEDOUT|ECONNRESET|socket|aborted|timeout/i.test(String(e.message) + String(e.cause?.code || ''))) throw e;
+    console.error('AI call failed, retrying once:', e.message); return llmOnce(opts); }
+}
+async function llmOnce({ system, text, images = [], timeoutMs, detail = 'high' }) {
+  const signal = AbortSignal.timeout(timeoutMs || +process.env.LLM_TIMEOUT_MS || 150000);
   const c = cfg();
   if (c.provider === 'claude') {
     const content = [...images.map(b64 => ({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b64 } })), { type: 'text', text }];
     const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST',
       headers: { 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-      body: JSON.stringify({ model: c.claudeModel, max_tokens: 1500, system, messages: [{ role: 'user', content }] }) });
+      body: JSON.stringify({ model: c.claudeModel, max_tokens: 1500, system, messages: [{ role: 'user', content }] }), signal });
     const j = await r.json(); if (!r.ok) throw new Error('Claude: ' + JSON.stringify(j.error || j));
     return j.content.map(x => x.text || '').join('');
   }
-  const content = [...images.map(b64 => ({ type: 'image_url', image_url: { url: 'data:image/jpeg;base64,' + b64, detail: 'high' } })), { type: 'text', text }];
+  const content = [...images.map(b64 => ({ type: 'image_url', image_url: { url: 'data:image/jpeg;base64,' + b64, detail } })), { type: 'text', text }];
   const r = await fetch('https://api.x.ai/v1/chat/completions', { method: 'POST',
     headers: { Authorization: 'Bearer ' + process.env.XAI_API_KEY, 'content-type': 'application/json' },
-    body: JSON.stringify({ model: c.xaiModel, messages: [{ role: 'system', content: system }, { role: 'user', content }] }) });
+    body: JSON.stringify({ model: c.xaiModel, messages: [{ role: 'system', content: system }, { role: 'user', content }] }), signal });
   const j = await r.json(); if (!r.ok) throw new Error('AI: ' + JSON.stringify(j.error || j));
   return j.choices[0].message.content;
 }

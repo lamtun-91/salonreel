@@ -191,8 +191,26 @@ function gapReport(shots, clips, qc, style) {
 }
 
 // ---------- 4. edit plan ----------
+// Duration policy: ~18s default, up to ~25s when there is plenty of usable (unflagged) footage, floor ~15s when footage allows,
+// hard cap 30s. Length comes only from real footage at the planned speeds; never from extra slow-mo or freeze/hold padding.
+const DURATION = { target: 18, stretch: 25, floor: 15, cap: 30 };
+function usableSeconds(clips, qc) {
+  const qcBy = Object.fromEntries((qc?.clips || []).map(c => [c.shot_id, c]));
+  let tot = 0;
+  for (const [id, c] of Object.entries(clips || {})) {
+    let free = [[0, +c.duration || 0]];
+    for (const [x, y] of avoidRanges(qcBy[id])) free = free.flatMap(([p, q]) => (y <= p || x >= q) ? [[p, q]] : [[p, Math.min(q, x)], [Math.max(p, y), q]].filter(([u, v]) => v - u > 0.01));
+    tot += free.reduce((a, [p, q]) => a + q - p, 0);
+  }
+  return r1(tot);
+}
+function durationPolicy(usable) {
+  const max = r1(Math.min(DURATION.stretch, Math.max(DURATION.target, DURATION.target + (usable - 25) * 0.7)));
+  return { usable_s: r1(usable), target_s: DURATION.target, max_s: max, floor_s: DURATION.floor, cap_s: DURATION.cap };
+}
 function beatGrid(track, total) { const step = 60 / (TRACK_BPM[track] || 100); const b = []; for (let t = 0; t <= total + 0.01; t += step) b.push(r2(t)); return b; }
 function editPrompt({ shots, clips, qc, mood, music, style }) {
+  const pol = durationPolicy(usableSeconds(Object.fromEntries(shots.filter(s => clips[s.id]).map(s => [s.id, clips[s.id]])), qc));
   const usable = shots.filter(s => clips[s.id]).map(s => { const q = qc.clips.find(c => c.shot_id === s.id) || {};
     return { shot_id: s.id, name: s.name, type: s.type, clip_duration_s: r1(clips[s.id].duration), best: q.best, visible: q.what_is_visible, issues: q.issues,
       avoid_ranges_s: avoidRanges(q), cropped_letterbox: !!q.crop }; });
@@ -201,7 +219,7 @@ Available clips: ${JSON.stringify(usable)}
 Return JSON only:
 {"segments":[{"shot_id":"s1","in_s":number,"out_s":number (within clip),"speed":0.5-2 (1 = normal; use >1 for cutting/blow-dry, slow-mo 0.6-0.8 for reveal),"ramp_to":optional speed for the second half,"zoom":{"type":"none|punch_in|push_in","at_s":seconds into segment,"scale":1.0-1.3},"transition_in":{"type":one of ${JSON.stringify(TRANSITIONS)},"duration":0.2-0.8}}],
  "beat_markers":[seconds on the final timeline where cuts should land],"music_start_s":0-20}
-Rules: total 15-30s; story order; the reveal last and longest; cuts on beats; first segment transition_in is "cut". Never use any part of a clip inside its avoid_ranges_s (garbled text, blur); skip a clip if nothing usable is left. Transitions are crossfades or cuts only.`;
+Rules: total about ${pol.target_s}s (usable footage ${pol.usable_s}s; up to ${pol.max_s}s only if there is enough good footage; never over 30s; at least ${pol.floor_s}s when the footage allows). Never slow clips down or hold frames just to reach a length; a shorter reel is fine when footage is thin. Story order; the reveal last and longest; cuts on beats; first segment transition_in is "cut". Never use any part of a clip inside its avoid_ranges_s (garbled text, blur); skip a clip if nothing usable is left. Transitions are crossfades or cuts only.`;
 }
 function cleanEdit(j, { shots, clips, qc, music }) {
   const segs = [], dropped = [], qcBy = Object.fromEntries((qc?.clips || []).map(c => [c.shot_id, c]));
@@ -226,13 +244,16 @@ function cleanEdit(j, { shots, clips, qc, music }) {
       transition_in: { type: segs.length ? tr : 'cut', duration: r2(clamp(s.transition_in?.duration || 0.4, 0.2, 0.8)) } });
   }
   if (segs.length < 2) throw new Error('Edit plan needs at least 2 usable clips' + (dropped.length ? ' (QC removed: ' + dropped.map(d => d.shot_id).join(', ') + ')' : ''));
-  // fit length: scale trims if over 30s
   const outDur = s => { const len = s.out_s - s.in_s; return s.ramp_to ? len / 2 / s.speed + len / 2 / s.ramp_to : len / s.speed; };
-  let tot = segs.reduce((a, s) => a + outDur(s), 0);
-  if (tot > 30) segs.forEach(s => { s.out_s = r2(s.in_s + (s.out_s - s.in_s) * 30 / tot); });
-  // under the 15s floor: lengthen clips into unused (unflagged) footage, reveal (last) first
-  for (const s of [...segs].reverse()) { const need = 15.5 - layout(segs, outDur).total; if (need <= 0) break;
-    const rate = s.ramp_to || s.speed; s.out_s = r2(Math.min(s.max_out, s.out_s + need * rate)); }
+  const pol = durationPolicy(usableSeconds(clips, qc));
+  // over the allowed max: trim every clip proportionally (speeds untouched)
+  let tot = layout(segs, outDur).total;
+  if (tot > pol.max_s) { const k = pol.max_s / tot; segs.forEach(s => { s.out_s = r2(s.in_s + Math.max(0.8, (s.out_s - s.in_s) * k)); }); }
+  // under the target: lengthen clips into unused, unflagged footage at their planned speed (reveal first). No slow-mo, no holds.
+  // Slow-mo > 1s of screen time per 1s of footage is not used for growth: only clips at speed >= 1 or the reveal may grow.
+  for (const s of [...segs].reverse()) { const need = pol.target_s - layout(segs, outDur).total; if (need <= 0.05) break;
+    const rate = s.ramp_to || s.speed; if (rate < 1 && s !== segs[segs.length - 1]) continue;
+    s.out_s = r2(Math.min(s.max_out, s.out_s + need * rate)); }
   const timeline = layout(segs, outDur);
   // snap transition starts to beats (adjust previous segment's out point)
   const beats = beatGrid(music, timeline.total);
@@ -241,11 +262,13 @@ function cleanEdit(j, { shots, clips, qc, music }) {
     const p = segs[i - 1], c = clips[p.shot_id];
     if (Math.abs(d) <= 0.3 && Math.abs(d) > 0.02) { const no = r2(p.out_s + d * (p.ramp_to || p.speed)); if (no <= c.duration && no - p.in_s >= 0.8) p.out_s = no; }
   }
-  { const last = segs[segs.length - 1], need = 15.05 - layout(segs, outDur).total; // beat snapping may trim a little; top up the reveal tail only
+  { const last = segs[segs.length - 1], need = pol.floor_s + 0.05 - layout(segs, outDur).total; // beat snapping may trim a little; top up the reveal tail only
     if (need > 0) last.out_s = r2(Math.min(last.max_out, last.out_s + need * (last.ramp_to || last.speed))); }
+  if (layout(segs, outDur).total > pol.cap_s) throw new Error('Edit plan over 30s');
   const tl = layout(segs, outDur); segs.forEach(x => delete x.max_out);
   return { segments: segs, timeline: tl.starts.map((st, i) => ({ shot_id: segs[i].shot_id, start_s: r2(st), end_s: r2(st + tl.durs[i]) })), total: r2(tl.total),
     beat_markers: beats.filter(b => b <= tl.total), ...musicStart(j.music_start_s, music, tl.starts[tl.starts.length - 1]), track: music,
+    duration_policy: pol,
     qc_enforced: { dropped, trimmed: segs.filter(x => avoidRanges(qcBy[x.shot_id]).length).map(x => x.shot_id), cropped: segs.filter(x => qcBy[x.shot_id]?.crop).map(x => x.shot_id) } };
 }
 // Default music start: put the track's drop on the reveal (last clip) start. Beat-aligned excerpts start on a beat, the drop is
@@ -362,5 +385,5 @@ function haircutOverride(body, qc, now = new Date()) {
   return { gate: 'no_haircut', confirmed: true, statement: 'Salon owner confirmed the finished cut is clearly visible in the real footage.',
     reason: String(o.reason || '').slice(0, 300), by: String(o.by || 'salon owner').slice(0, 80), at: now.toISOString(), qc_overall: qc.overall || '' };
 }
-module.exports = { musicStart, TRANSITIONS, normTransition, PROCESS_TYPES, cleanFlags, avoidRanges, freeWindow, barsFromRows, analyzeBars, shortSummary, clipWindows, alignOverlays, captionFrameStamps, validateOverlays, xfadePlan, layout, haircutOverride, STYLES, MOODS, TRACK_BPM, shotPrompt, cleanShots, mockShots, splitPrompt, cleanSplit, mockSplit, qcPrompt, cleanQC, mockQC, gapReport,
+module.exports = { DURATION, usableSeconds, durationPolicy, musicStart, TRANSITIONS, normTransition, PROCESS_TYPES, cleanFlags, avoidRanges, freeWindow, barsFromRows, analyzeBars, shortSummary, clipWindows, alignOverlays, captionFrameStamps, validateOverlays, xfadePlan, layout, haircutOverride, STYLES, MOODS, TRACK_BPM, shotPrompt, cleanShots, mockShots, splitPrompt, cleanSplit, mockSplit, qcPrompt, cleanQC, mockQC, gapReport,
   editPrompt, cleanEdit, mockEdit, breakdownFor, segFilter, ffEsc, beatGrid };

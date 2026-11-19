@@ -295,7 +295,7 @@ module.exports = ({ app, llm, parseJSON, run, probe, cfg, TRACKS, D, id, wrap })
         }
       } catch (e) { visionErr = 'frames: ' + e.message; images = []; }
       if (images.length) {
-        try { copy = P.cleanCopy(parseJSON(await llm({ system: P.copySystem, images, text: text + P.visionCaptionAddendum(frameMap) })), p.edit.total); if (copy.error) throw new Error(copy.error); copy.mode = 'vision'; }
+        try { copy = P.cleanCopy(parseJSON(await llm({ system: P.copySystem, images, detail: 'low', timeoutMs: 90000, retry: false, text: text + P.visionCaptionAddendum(frameMap) })), p.edit.total); if (copy.error) throw new Error(copy.error); copy.mode = 'vision'; }
         catch (e) { visionErr = 'vision: ' + String(e.message).slice(0, 200); copy = null; }
       }
       if (!copy || copy.error === undefined && !copy.script?.length) { copy = P.cleanCopy(parseJSON(await llm({ system: P.copySystem, text })), p.edit.total); copy.mode = 'text'; }
