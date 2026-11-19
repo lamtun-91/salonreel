@@ -110,6 +110,7 @@ if (process.env.ENABLE_IG_PUBLISH === '1') setInterval(() => tick().catch(consol
 
 // ---------- routes ----------
 const app = express(); app.use(express.json({ limit: '1mb' }));
+app.use(require('./routes_avatar').staticGuard()); // AI Twin page hidden unless ENABLE_AI_TWIN=1
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/renders', express.static(D('renders')));
 app.use('/uploads', express.static(D('uploads')));
@@ -185,6 +186,7 @@ if (process.env.ENABLE_IG_PUBLISH === '1') app.post('/api/publish', wrap(async (
 app.get('/api/scheduled', (q, s) => s.json(loadJobs()));
 
 require('./routes_studio')({ app, llm, parseJSON, run, probe, cfg, TRACKS, D, id, wrap, express });
+if (process.env.ENABLE_AI_TWIN === '1') require('./routes_avatar')({ app, llm, parseJSON, run, probe, cfg, TRACKS, D, id, wrap, express }); // "Your AI Twin" (M1 stub)
 Promise.all([ensureMusic(), ensureSample()]).then(() => app.listen(PORT, async () => {
   console.log('Storage:', require('./storage').R2 ? 'R2 ' + await require('./storage').ensureCors([process.env.PUBLIC_BASE_URL, 'http://localhost:' + PORT].filter(Boolean)) : 'local disk');
   const c = cfg(); console.log(`SalonReel on :${PORT} | LLM ${c.provider} ${c.llmLive ? 'LIVE' : 'DEMO'} | Instagram ${c.igLive ? 'LIVE' : 'DEMO'}`);

@@ -12,7 +12,7 @@ if (R2) {
     credentials: { accessKeyId: process.env.R2_ACCESS_KEY_ID, secretAccessKey: process.env.R2_SECRET_ACCESS_KEY } });
 }
 const Bucket = process.env.R2_BUCKET;
-const safeKey = k => { if (!/^projects\/[a-z0-9]+\/[\w./-]+$/.test(k) || k.includes('..')) throw new Error('bad key'); return k; };
+const safeKey = k => { if (!/^(projects\/[a-z0-9]+|twins\/[a-z0-9-]+)\/[\w./-]+$/.test(k) || k.includes('..')) throw new Error('bad key'); return k; };
 const lp = k => path.join(LOCAL, safeKey(k));
 const sign = (k, exp, op) => crypto.createHmac('sha256', SECRET).update(`${op}:${k}:${exp}`).digest('hex').slice(0, 32);
 

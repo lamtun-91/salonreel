@@ -1,0 +1,83 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SalonReel — Your AI Twin</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,600;1,500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#fbf6f3;--ink:#2b2125;--mut:#8a7a80;--rose:#c8768a;--gold:#c9a46a;--card:#fff;--line:#eee2dd;--tw:#4b3f8a}
+*{box-sizing:border-box}body{margin:0;font-family:Inter,system-ui,sans-serif;background:var(--bg);color:var(--ink)}
+header{display:flex;align-items:center;justify-content:space-between;padding:18px 22px;border-bottom:1px solid var(--line);background:#fff8;flex-wrap:wrap;gap:10px}
+.logo{font-family:'Playfair Display',serif;font-size:24px}.logo i{color:var(--rose)}.nav{display:flex;gap:10px;align-items:center}.nav>a{font-size:13px;color:var(--ink);text-decoration:none;font-weight:600}
+.pathsw{display:inline-flex;border:1px solid var(--line);border-radius:22px;padding:3px;background:#fff;margin-right:6px}.pathsw a{padding:5px 12px;border-radius:18px;font-size:12px;color:var(--mut);text-decoration:none;font-weight:600}.pathsw a.on{background:var(--ink);color:#fff}
+.steps{display:flex;gap:6px;justify-content:center;padding:16px;flex-wrap:wrap}.steps span{font-size:12px;padding:6px 12px;border-radius:20px;background:#fff;border:1px solid var(--line);color:var(--mut)}.steps span.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+main{max-width:920px;margin:0 auto 40px;padding:0 18px}section{display:none;background:#fff;border:1px solid var(--line);border-radius:24px;padding:26px}section.on{display:block}
+h2{font-family:'Playfair Display',serif;margin:0 0 4px;font-size:26px}.s{color:var(--mut);font-size:14px;margin:0 0 16px}
+label{display:block;font-size:13px;font-weight:600;margin:14px 0 6px}input,select,textarea{width:100%;font:inherit;font-size:14px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:#fff}
+.btn{font:inherit;font-weight:600;font-size:14px;border:0;border-radius:30px;padding:12px 20px;cursor:pointer;background:var(--ink);color:#fff}.btn.rose{background:var(--rose)}.btn.ghost{background:#fff;color:var(--ink);border:1px solid var(--line)}.btn:disabled{opacity:.45;cursor:not-allowed}.btn.sm{padding:6px 11px;font-size:12px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.two{display:grid;grid-template-columns:1fr 1fr;gap:0 14px}@media(max-width:720px){.two{grid-template-columns:1fr}}
+.lib{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:14px}
+.av{border:2px solid var(--line);border-radius:18px;overflow:hidden;background:#fff;cursor:pointer;position:relative;transition:.15s}.av.sel{border-color:var(--rose);box-shadow:0 0 0 3px #c8768a33}.av.dis{cursor:default}.av.dis .th{filter:grayscale(.7) opacity(.6)}
+.av .th{aspect-ratio:3/4;width:100%;display:block;object-fit:cover;background:#eee}.av .b{padding:10px 12px}.av .n{font-weight:600;font-size:15px}.av .chips{position:absolute;top:8px;left:8px;right:8px;display:flex;gap:4px;flex-wrap:wrap}
+.chip{font-size:10px;font-weight:700;border-radius:20px;padding:3px 8px;background:#fffd;color:var(--ink);text-transform:uppercase;letter-spacing:.03em}.chip.sample{background:#2b2125;color:#fff}.chip.ready{background:#e6f4ea;color:#256c3a}.chip.training{background:#fdf0d8;color:#7a5a1e}.chip.failed{background:#fdecea;color:#8c1d18}.chip.def{background:var(--gold);color:#fff}.chip.last{background:#e7e3f6;color:var(--tw)}
+.av .acts{display:flex;gap:4px;margin-top:8px;flex-wrap:wrap}.av .acts button{font:inherit;font-size:11px;border:1px solid var(--line);background:#fff;border-radius:14px;padding:4px 8px;cursor:pointer}
+.add{border:2px dashed var(--line);border-radius:18px;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:260px;color:var(--mut);cursor:pointer;background:#fdfbfa;font:inherit}.add b{font-size:34px;color:var(--rose)}
+.empty{text-align:center;padding:34px;border:2px dashed var(--line);border-radius:18px;color:var(--mut);margin-bottom:14px}
+.tpls{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}@media(max-width:720px){.tpls{grid-template-columns:1fr 1fr}}.tpl{border:2px solid var(--line);border-radius:16px;padding:14px;cursor:pointer;background:#fff;font:inherit;text-align:left}.tpl.on{border-color:var(--rose);background:#fdf3f5}.tpl b{display:block;font-size:15px;margin-bottom:4px}.tpl span{font-size:12px;color:var(--mut)}
+.drop{border:2px dashed var(--line);border-radius:18px;padding:22px;text-align:center;background:#fdfbfa}.drop img{max-width:220px;max-height:260px;border-radius:12px;display:block;margin:10px auto}
+.cap{display:grid;grid-template-columns:70px 70px 1fr;gap:6px;margin:6px 0}.cap input{padding:7px 9px;font-size:13px}.broll{border:1px solid var(--line);border-radius:14px;padding:10px 12px;margin:8px 0;background:#fdfbfa;font-size:13px}.broll textarea{margin-top:6px;font-size:13px}
+.pill{display:inline-block;font-size:11px;border-radius:20px;padding:3px 9px;margin-left:6px;font-weight:600}.ok{background:#e6f4ea;color:#256c3a}.warn{background:#fdf0d8;color:#7a5a1e}.aib{background:#2b2125;color:#fff}
+.phone{width:270px;aspect-ratio:9/16;border-radius:36px;border:8px solid #1d1719;position:relative;overflow:hidden;margin:auto;background:#000}.phone video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.grid{display:grid;grid-template-columns:300px 1fr;gap:24px}@media(max-width:720px){.grid{grid-template-columns:1fr}}
+.consent{display:flex;gap:10px;align-items:flex-start;font-weight:500;font-size:13px}.consent input{width:auto;margin-top:2px}
+.note{font-size:12px;color:var(--mut);background:#fdf6e9;border-radius:10px;padding:8px 12px;margin-top:12px}.iga{font-size:13px;background:#e7e3f6;color:#2f2760;border-radius:12px;padding:10px 14px;margin-top:12px}
+.err{color:#b3261e;font-size:13px;margin-top:10px;white-space:pre-wrap}.bar{height:8px;background:#f3e3e7;border-radius:8px;overflow:hidden;margin:18px 0}.bar div{height:100%;width:0;background:var(--rose);transition:width .6s}
+.banner{background:#efeaf9;color:#3f3577;text-align:center;font-size:13px;padding:8px}
+.modal{position:fixed;inset:0;background:#2b212599;display:none;align-items:center;justify-content:center;padding:20px;z-index:8}.modal.on{display:flex}.modal>div{background:#fff;border-radius:20px;padding:26px;max-width:400px;width:100%}
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:12px 20px;border-radius:30px;font-size:14px;display:none;z-index:9}
+footer{text-align:center;font-size:11px;color:var(--mut);padding:10px 0 30px}footer a{color:var(--mut)}
+.reel{display:flex;justify-content:space-between;align-items:center;border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin:8px 0;cursor:pointer}
+</style></head><body>
+<header><div class="logo">Salon<i>Reel</i> <span style="font-size:13px;font-family:Inter;color:var(--mut)">Studio</span></div>
+<div class="nav"><span class="pathsw"><a href="/?path=real_footage" id="swReveal">Hair Reveal</a><a href="#" class="on">Your AI Twin</a></span><a href="#" id="newBtn">+ New reel</a><a href="/?reels=1" id="reelsBtn">My Reels</a></div></header>
+<div class="banner" id="stubBanner" hidden>Preview: avatars and videos are simulated placeholders in this build. Nothing is sent to an AI video service yet.</div>
+<div class="steps" id="steps"><span>1 Avatar</span><span>2 Template</span><span>3 Product photo</span><span>4 Approve script</span><span>5 Render</span><span>6 Review &amp; export</span></div>
+<main>
+<section id="t0"><h2>Choose your AI twin</h2><p class="s">Who talks in this Reel? Your last-used avatar is picked for you.</p>
+<div id="lib"></div><div class="err" id="e0"></div>
+<div class="row" style="margin-top:18px"><button class="btn rose" id="useBtn" disabled>Continue →</button><span class="s" id="useMsg" style="margin:0"></span></div></section>
+
+<section id="t1"><h2>What's this Reel about?</h2><p class="s">Pick a template. We fill in an example you can edit.</p>
+<div class="tpls" id="tpls"></div>
+<label>Your brief</label><textarea id="prompt" rows="3"></textarea>
+<div class="two"><div><label>Salon name</label><input id="salon" value="Olya Atelier"></div><div><label>Mood</label><select id="mood"></select></div>
+<div><label>Music</label><select id="music"></select></div><div><label>Language</label><select id="language"><option>English</option><option>Spanish</option><option>French</option><option>Vietnamese</option><option>Portuguese</option><option>German</option><option>Italian</option></select></div></div>
+<p class="note">AI twin reels are for talking-to-camera content. To show a client's hair result, use Hair Reveal with real footage.</p>
+<div class="err" id="e1"></div><div class="row" style="margin-top:18px"><button class="btn ghost" onclick="go(0)">← Avatar</button><button class="btn rose" id="briefBtn">Next: product photo →</button></div></section>
+
+<section id="t2"><h2>Add a product photo <span class="pill warn">optional</span></h2><p class="s">Show one of your real retail products for a few seconds. JPEG, PNG or WebP.</p>
+<div class="drop" id="drop"><div id="prodPrev"></div><input type="file" id="prodFile" accept="image/jpeg,image/png,image/webp" style="width:auto"><div class="s" id="prodStat" style="margin:8px 0 0"></div></div>
+<div class="err" id="e2"></div><div class="row" style="margin-top:18px"><button class="btn ghost" onclick="go(1)">← Brief</button><button class="btn ghost" id="skipBtn">Skip</button><button class="btn rose" id="draftBtn">Write my script →</button></div></section>
+
+<section id="t3"><h2>Approve your script</h2><p class="s" id="draftStat">Nothing is rendered until you approve.</p>
+<label>What your twin will say <span class="pill" id="durPill"></span></label><textarea id="script" rows="6"></textarea>
+<label>On-screen captions (start s · end s · text)</label><div id="caps"></div>
+<label>AI B-roll beats <span class="pill aib">AI</span></label><div id="broll"></div><div id="prodSlot"></div>
+<label class="consent"><input type="checkbox" id="approve"><span>I approve this script. It doesn't show a client's hair result, make medical claims, or feature minors or celebrities.</span></label>
+<div class="err" id="e3"></div><div class="row" style="margin-top:18px"><button class="btn ghost" onclick="go(2)">← Product photo</button><button class="btn ghost" id="redraftBtn">↻ Rewrite</button><button class="btn rose" id="approveBtn" disabled>Approve &amp; render →</button></div></section>
+
+<section id="t4"><h2>Rendering…</h2><p class="s" id="renStat">Your twin is recording, B-roll is being made and captions are added.</p><div class="bar"><div id="bar"></div></div><div class="err" id="e4"></div></section>
+
+<section id="t5"><h2>Review &amp; export <span class="pill aib">AI-generated</span></h2><div class="grid"><div><div class="phone"><video id="prevV" controls playsinline controlsList="nodownload"></video></div><p class="s" id="renSum" style="text-align:center;margin-top:8px"></p></div>
+<div><label>On-screen captions</label><div id="caps2"></div><button class="btn ghost sm" id="rerBtn" style="margin-top:6px">↻ Re-render with edits</button><span class="s" id="rerStat"></span>
+<label>Caption</label><textarea id="caption" rows="5"></textarea><label>Hashtags</label><textarea id="tags" rows="2"></textarea>
+<label class="consent"><input type="checkbox" id="noMusic"><span>Export without background music</span></label>
+<label class="consent"><input type="checkbox" id="consent"><span id="consentTxt"></span></label>
+<div class="iga" id="igaTxt"></div>
+<div class="row" style="margin-top:14px"><button class="btn rose" id="expBtn" disabled>⬇ Export MP4</button><button class="btn ghost" id="copyBtn">Copy caption &amp; hashtags</button></div><div id="dl" style="margin-top:10px"></div>
+<div class="err" id="e5"></div><div class="note">📱 Post it yourself: Instagram → + → Reel → pick the video → Advanced settings → turn on the AI label.</div></div></div></section>
+</main>
+<footer>AI B-roll <a href="https://runway.com" target="_blank" rel="noopener" id="runwayLink">Powered by Runway</a></footer>
+<div class="modal" id="addM"><div><h2 style="font-size:22px">Add an avatar</h2><p class="s">Record a short, well-lit clip of yourself talking to camera. We'll train your twin from it.</p>
+<label>Name</label><input id="avName" placeholder="e.g. Olya"><label>Role</label><select id="avRole"><option value="stylist">Stylist</option><option value="owner">Owner</option></select>
+<label>Training clip</label><input type="file" id="avFile" accept="video/*"><p class="note">Preview build: training is simulated and takes a few seconds. Nothing is uploaded to an AI service.</p>
+<div class="err" id="eAdd"></div><div class="row" style="margin-top:14px"><button class="btn ghost" id="addCancel">Cancel</button><button class="btn rose" id="addOk">Start training</button></div></div></div>
+<div class="toast" id="toast"></div>
+<script src="/twin.js"></script></body></html>

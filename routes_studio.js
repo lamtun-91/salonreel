@@ -56,7 +56,7 @@ module.exports = ({ app, llm, parseJSON, run, probe, cfg, TRACKS, D, id, wrap })
   // My Reels
   app.get('/api/projects', wrap(async (q, s) => {
     const ids = await st.listProjectIds(), out = [];
-    for (const i of ids.slice(-50)) { try { const p = await st.getJSON(pkey(i)); out.push({ id: p.id, created: p.created, updated: p.updated, status: p.status, salon: p.profile?.salon, style: p.inputs?.style, concept: p.plan?.concept, exported: !!p.export }); } catch {} }
+    for (const i of ids.slice(-50)) { try { const p = await st.getJSON(pkey(i)); out.push({ id: p.id, created: p.created, updated: p.updated, status: p.status, salon: p.profile?.salon, style: p.inputs?.style, concept: p.plan?.concept, exported: !!p.export, path: p.path || 'real_footage', template: p.template }); } catch {} }
     s.json(out.sort((a, b) => (b.updated || '').localeCompare(a.updated || '')));
   }));
   app.get('/api/projects/:id', wrap(async (q, s) => s.json(await view(await load(q.params.id)))));
