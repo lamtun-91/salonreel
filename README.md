@@ -21,7 +21,7 @@ If keys are missing, the app runs in **demo mode** and shows a banner. In demo m
 | Render | `POST /api/render {videoId,lines,salon,track,per,tone}` | ffmpeg renders a 9:16 1080×1920 H.264/AAC MP4 with burned-in timed captions (ASS), a salon-name overlay, and music mixed under the original audio. Output goes to `/renders/<id>.mp4` |
 | Publish | `POST /api/publish {renderId,caption,when?}` | Instagram Graph API steps: create a `REELS` container from `video_url`, poll `status_code` until FINISHED, then call `media_publish`. If `when` is in the future, the post is queued in `data/scheduled.json` and the server publishes it at that time; the server must be running then |
 
-Music tracks are **placeholders synthesized by ffmpeg** (`data/music/*.m4a`), so they're royalty-free. To use licensed audio, swap in your own files and add them to `TRACKS` in `server.js`.
+Music is a licensed library in `music/` (14 tracks, Mixkit Stock Music Free License: commercial use incl. online ads, no attribution, no Content ID registration). `music/manifest.json` lists title, artist, mood, bpm, drop_s, source page and licence URL for every track; `music.js` loads it. Files are beat-aligned 60s excerpts at 128 kbps AAC. The old ffmpeg-synth ids (`velvet`, `glow`, `silk`) map to real tracks. For Shotstack the track is uploaded once to R2 as `music/<id>.m4a` and passed as a presigned HTTPS URL.
 
 ## Getting keys
 - **XAI_API_KEY**: https://console.x.ai → API Keys. Set `XAI_MODEL` to an xAI model that accepts image input (check the current list at https://docs.x.ai).
@@ -53,3 +53,12 @@ Music tracks are **placeholders synthesized by ffmpeg** (`data/music/*.m4a`), so
 6. **Review & export:** edit the overlay text or timings and re-render. Export requires the consent checkbox; the server records the consent in project.json and returns a presigned download.
 
 Storage layout: `projects/{id}/project.json`, `projects/{id}/raw/*`, `projects/{id}/renders/*`. "My Reels" lists the projects (`GET /api/projects`). At startup the server tries to set the bucket's CORS rules so browser uploads work, and logs the result.
+
+## Render behaviour (2026-11-18 fixes)
+- Transitions are true crossfades or hard cuts, never through black. ffmpeg uses `xfade` pieces; Shotstack stacks clips on separate tracks and tweens the incoming clip's opacity. Rendered length equals the plan total (overlaps counted).
+- Salon name sits in a top band (y≈285) and captions in a separate lower band with a semi-opaque box, both inside the Instagram Reels safe area.
+- Reveal-only briefs plan only finished-look shots. The readiness gate passes when a reveal clip is filmed, technically usable and QC saw the finished cut.
+- QC flags are enforced: letterbox / blurred-fill bars are detected and cropped; text-overlay or blur ranges are trimmed out or the clip is dropped.
+- Captions are written from 1-2 keyframes per clip of the final edit (vision), then snapped to the clip on screen; text-only fallback if frames or the vision call fail.
+- `music:false` on `/edit`, `/rerender` or `/export` gives a no-music version with identical timing (Shotstack: no soundtrack clip; ffmpeg: silent bed). Recorded as `render.music`, `export.music`, `renderVariants`.
+- Shotstack stays on the sandbox (`SHOTSTACK_ENV` default `stage`, watermarked) until a production key is added with `SHOTSTACK_ENV=v1`.

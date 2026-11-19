@@ -3,10 +3,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg fonts-de
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci --omit=dev
-COPY server.js pipeline.js storage.js studio.js routes_studio.js shotstack.js ./
+COPY server.js pipeline.js storage.js studio.js routes_studio.js shotstack.js music.js ./
 COPY prompts ./prompts
 COPY assets ./assets
 COPY public ./public
+COPY music ./music
 ENV NODE_ENV=production PORT=10000
 EXPOSE 10000
 CMD ["node", "server.js"]

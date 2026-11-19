@@ -96,7 +96,7 @@ const pk=()=>'salonreel:profile:'+($('salon').value.trim().toLowerCase()||'defau
 function loadProfile(){let p={};try{p=JSON.parse(localStorage.getItem(pk())||'{}')}catch(e){}PF.forEach(k=>{if(p[k]!=null)$(k).value=p[k]})}
 function saveProfile(){const p={};PF.forEach(k=>p[k]=$(k).value);localStorage.setItem(pk(),JSON.stringify(p));localStorage.setItem('salonreel:last',$('salon').value)}
 api('/api/studio/config').then(c=>{C=c;$('style').innerHTML=c.styles.map(s=>`<option>${s}</option>`).join('');$('mood').innerHTML=c.moods.map(s=>`<option>${s}</option>`).join('');
- $('music').innerHTML=c.tracks.map(t=>`<option value="${t.id}">${esc(t.label)}</option>`).join('');$('consentTxt').textContent=c.consent;
+ {const g={};c.tracks.forEach(t=>(g[t.moodLabel||'Other']=g[t.moodLabel||'Other']||[]).push(t));$('music').innerHTML=Object.entries(g).map(([m,ts])=>m=='No music'||m=='none'?ts.map(t=>`<option value="${t.id}">No music</option>`).join(''):`<optgroup label="${esc(m)}">${ts.map(t=>`<option value="${t.id}"${t.id==c.defaultTrack?' selected':''}>${esc(t.name||t.label)} · ${t.bpm} bpm</option>`).join('')}</optgroup>`).join('')}$('consentTxt').textContent=c.consent;
  if(localStorage.getItem('salonreel:last'))$('salon').value=localStorage.getItem('salonreel:last');loadProfile();
  const id=location.hash.slice(1);if(/^[a-z0-9]{12}$/.test(id))openProject(id)});
 $('salon').onchange=loadProfile;PF.forEach(k=>$(k).addEventListener('change',saveProfile));

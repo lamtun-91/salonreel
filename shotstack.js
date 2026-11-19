@@ -199,7 +199,7 @@ function buildEditPayload({ edit, clips, clipUrls, musicUrl, profile = {}, crops
     if (!/^https:\/\//i.test(musicUrl)) throw new Error('music URL must be a public https URL');
     tracks.push({
       clips: [{
-        asset: { type: 'audio', src: musicUrl, trim: r1(Math.max(0, +edit.music_start_s || 0)), volume: 0.85, effect: 'fadeOut' },
+        asset: { type: 'audio', src: musicUrl, trim: r2(Math.max(0, +edit.music_start_s || 0)), volume: 0.85, effect: 'fadeOut' },
         start: 0, length: total,
       }],
     });

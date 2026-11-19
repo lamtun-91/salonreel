@@ -15,7 +15,8 @@ const styleTypes = style => style === 'Reveal-only' ? FINISHED_TYPES : SHOT_TYPE
 const requiredTypes = () => ['reveal'];
 const STYLES = ['Transformation', 'Process', 'Reveal-only', 'Tutorial'];
 const MOODS = ['Luxe', 'Fun', 'Minimal'];
-const TRACK_BPM = { velvet: 80, glow: 120, silk: 60, none: 100 };
+const MUSIC = require('./music');
+const TRACK_BPM = new Proxy({}, { get: (_, k) => typeof k === 'string' ? MUSIC.bpmFor(k) : undefined });
 
 // ---------- 1. shot list ----------
 function shotPrompt({ profile: p = {}, style, mood, music }) {
@@ -240,10 +241,21 @@ function cleanEdit(j, { shots, clips, qc, music }) {
     const p = segs[i - 1], c = clips[p.shot_id];
     if (Math.abs(d) <= 0.3 && Math.abs(d) > 0.02) { const no = r2(p.out_s + d * (p.ramp_to || p.speed)); if (no <= c.duration && no - p.in_s >= 0.8) p.out_s = no; }
   }
+  { const last = segs[segs.length - 1], need = 15.05 - layout(segs, outDur).total; // beat snapping may trim a little; top up the reveal tail only
+    if (need > 0) last.out_s = r2(Math.min(last.max_out, last.out_s + need * (last.ramp_to || last.speed))); }
   const tl = layout(segs, outDur); segs.forEach(x => delete x.max_out);
   return { segments: segs, timeline: tl.starts.map((st, i) => ({ shot_id: segs[i].shot_id, start_s: r2(st), end_s: r2(st + tl.durs[i]) })), total: r2(tl.total),
-    beat_markers: beats.filter(b => b <= tl.total), music_start_s: r1(clamp(j.music_start_s, 0, 20)), track: music,
+    beat_markers: beats.filter(b => b <= tl.total), ...musicStart(j.music_start_s, music, tl.starts[tl.starts.length - 1]), track: music,
     qc_enforced: { dropped, trimmed: segs.filter(x => avoidRanges(qcBy[x.shot_id]).length).map(x => x.shot_id), cropped: segs.filter(x => qcBy[x.shot_id]?.crop).map(x => x.shot_id) } };
+}
+// Default music start: put the track's drop on the reveal (last clip) start. Beat-aligned excerpts start on a beat, the drop is
+// on a beat and the reveal start is snapped to the beat grid, so the result stays on the grid. Falls back to the planner's value.
+function musicStart(planned, track, revealStart) {
+  const drop = MUSIC.dropFor(track), dur = MUSIC.TRACKS[MUSIC.resolve(track)]?.duration_s || 60, p = 60 / MUSIC.bpmFor(track);
+  if (drop != null && track !== 'none') { let ms = drop - revealStart; ms = Math.round(ms / p) * p;
+    if (ms >= 0 && ms <= dur - 31) return { music_start_s: r2(ms), music_start_source: 'drop', music_drop_at_s: r2(drop - ms) }; }
+  const ms = Math.round(clamp(planned, 0, 20) / p) * p;
+  return { music_start_s: r2(ms), music_start_source: 'plan' };
 }
 function layout(segs, outDur) {
   const starts = [], durs = segs.map(outDur); let t = 0;
@@ -350,5 +362,5 @@ function haircutOverride(body, qc, now = new Date()) {
   return { gate: 'no_haircut', confirmed: true, statement: 'Salon owner confirmed the finished cut is clearly visible in the real footage.',
     reason: String(o.reason || '').slice(0, 300), by: String(o.by || 'salon owner').slice(0, 80), at: now.toISOString(), qc_overall: qc.overall || '' };
 }
-module.exports = { TRANSITIONS, normTransition, PROCESS_TYPES, cleanFlags, avoidRanges, freeWindow, barsFromRows, analyzeBars, shortSummary, clipWindows, alignOverlays, captionFrameStamps, validateOverlays, xfadePlan, layout, haircutOverride, STYLES, MOODS, TRACK_BPM, shotPrompt, cleanShots, mockShots, splitPrompt, cleanSplit, mockSplit, qcPrompt, cleanQC, mockQC, gapReport,
+module.exports = { musicStart, TRANSITIONS, normTransition, PROCESS_TYPES, cleanFlags, avoidRanges, freeWindow, barsFromRows, analyzeBars, shortSummary, clipWindows, alignOverlays, captionFrameStamps, validateOverlays, xfadePlan, layout, haircutOverride, STYLES, MOODS, TRACK_BPM, shotPrompt, cleanShots, mockShots, splitPrompt, cleanSplit, mockSplit, qcPrompt, cleanQC, mockQC, gapReport,
   editPrompt, cleanEdit, mockEdit, breakdownFor, segFilter, ffEsc, beatGrid };

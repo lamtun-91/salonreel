@@ -1,6 +1,6 @@
 // Studio API: projects stored in R2 (or local disk) under projects/{id}/
 const fs = require('fs'), path = require('path'), crypto = require('crypto');
-const st = require('./storage'), S = require('./studio'), P = require('./pipeline'), SS = require('./shotstack');
+const MUSIC = require('./music'), st = require('./storage'), S = require('./studio'), P = require('./pipeline'), SS = require('./shotstack');
 const CONSENT = 'The client agreed to be featured online.';
 const P_outDur = sg => Math.round(SS.segmentTimelineDuration(sg) * 1000) / 1000;
 
@@ -50,7 +50,7 @@ module.exports = ({ app, llm, parseJSON, run, probe, cfg, TRACKS, D, id, wrap })
   app.get('/api/local/get', wrap(async (q, s) => { const k = st.verifyLocal(q.query, 'get'); if (q.query.dl) s.attachment(q.query.dl); s.sendFile(st.lp(k)); }));
 
   app.get('/api/studio/config', (q, s) => { const rp = SS.resolveProvider(); s.json({ storage: st.R2 ? 'r2' : 'local', llmLive: live(), provider: cfg().provider, renderProvider: rp.provider, renderProviderReason: rp.reason, styles: S.STYLES, moods: S.MOODS,
-    tracks: Object.entries(TRACKS).map(([k, v]) => ({ id: k, label: v.label, bpm: S.TRACK_BPM[k] })), consent: CONSENT }); });
+    tracks: Object.entries(TRACKS).map(([k, v]) => ({ id: k, label: v.label, name: v.name, mood: v.mood, moodLabel: v.moodLabel, bpm: v.bpm, drop_s: v.drop_s ?? null })), defaultTrack: MUSIC.DEFAULT, consent: CONSENT }); });
 
   // My Reels
   app.get('/api/projects', wrap(async (q, s) => {
@@ -62,8 +62,8 @@ module.exports = ({ app, llm, parseJSON, run, probe, cfg, TRACKS, D, id, wrap })
 
   // 1. create + shot list
   app.post('/api/projects', wrap(async (q, s) => {
-    const { profile = {}, style = 'Transformation', mood = 'Luxe', music = 'velvet' } = q.body;
-    const p = { id: crypto.randomBytes(6).toString('hex'), created: new Date().toISOString(), status: 'planning', profile, inputs: { style, mood, music: TRACKS[music] ? music : 'velvet' }, clips: {} };
+    const { profile = {}, style = 'Transformation', mood = 'Luxe', music = MUSIC.DEFAULT } = q.body;
+    const p = { id: crypto.randomBytes(6).toString('hex'), created: new Date().toISOString(), status: 'planning', profile, inputs: { style, mood, music: music === 'none' ? 'none' : MUSIC.resolve(music) }, clips: {} };
     const ctx = { profile, style, mood, music: p.inputs.music };
     p.plan = live() ? S.cleanShots(parseJSON(await llm({ system: 'You are a social video producer for hair salons. Reply with JSON only.', text: S.shotPrompt(ctx) })), style) : S.mockShots(ctx);
     p.plan.mode = live() ? 'live' : 'demo'; p.status = 'filming';
@@ -138,10 +138,9 @@ module.exports = ({ app, llm, parseJSON, run, probe, cfg, TRACKS, D, id, wrap })
     return absoluteUrl(await st.presignGet(key));
   }
   async function ensureMusicUrl(p, track) {
-    if (!TRACKS[track]?.expr) return null;
-    const local = D('music', track + '_60.m4a');
-    if (!fs.existsSync(local)) throw new Error('music file missing for track ' + track);
-    const key = `projects/${p.id}/music/${track}_60.m4a`;
+    if (track === 'none') return null;
+    const local = MUSIC.fileFor(track); if (!local) throw new Error('music file missing for track ' + track);
+    const key = `music/${path.basename(local)}`; // shared library object; presigned https GET for Shotstack
     if (!(await st.exists(key))) await st.putFile(key, local, 'audio/mp4');
     return mediaUrl(key);
   }
@@ -168,7 +167,7 @@ module.exports = ({ app, llm, parseJSON, run, probe, cfg, TRACKS, D, id, wrap })
     const acc = path.join(dir, 'acc.mp4'); await run('ffmpeg', ['-y', '-f', 'concat', '-safe', '0', '-i', list, '-c', 'copy', acc]);
     tmp.forEach(f => fs.unlinkSync(f)); const accDur = (await probe(acc)).duration || t;
     const args = ['-y', '-threads', '1', '-i', acc], fc = [], last = '[0:v]tpad=stop_mode=clone:stop_duration=1[vp];[vp]';
-    const music = p.musicOn !== false && TRACKS[e.track]?.expr ? D('music', e.track + '_60.m4a') : null; // no-music export: silent bed, same timing
+    const music = p.musicOn !== false && e.track !== 'none' ? MUSIC.fileFor(e.track) : null; // no-music export: silent bed, same timing
     const total = t, ass = path.join(dir, 'cap.ass');
     const lines = P.cleanSegments(e.overlays || [], total, 'text');
     fs.writeFileSync(ass, P.buildAss({ lines, salon: p.profile.salon || '', duration: total, tone: String(p.inputs.mood).toLowerCase() }));

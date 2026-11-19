@@ -26,19 +26,12 @@ function cfg() {
   };
 }
 
-// ---------- music (ffmpeg-synthesized placeholders, royalty-free by construction) ----------
-const TRACKS = {
-  velvet: { label: 'Velvet Hours — synthesized lo-fi pad (placeholder)', expr: "0.18*sin(2*PI*220*t)*(0.6+0.4*sin(2*PI*0.5*t))+0.12*sin(2*PI*277.18*t)+0.10*sin(2*PI*329.63*t)" },
-  glow: { label: 'Golden Glow — synthesized upbeat pulse (placeholder)', expr: "(0.2*sin(2*PI*261.63*t)+0.15*sin(2*PI*392*t))*(0.5+0.5*gt(mod(t,0.5),0.25))+0.2*sin(2*PI*65*t)*exp(-12*mod(t,0.5))" },
-  silk: { label: 'Salt & Silk — synthesized ambient drone (placeholder)', expr: "0.15*sin(2*PI*174.6*t)+0.1*sin(2*PI*261.6*t+sin(2*PI*0.2*t))+0.08*sin(2*PI*349.2*t)" },
-  none: { label: 'No music' },
-};
+// ---------- music: licensed library in ./music (Mixkit Stock Music Free License, see music/manifest.json) ----------
+const MUSIC = require('./music');
+const TRACKS = MUSIC.TRACKS;
 async function ensureMusic() {
-  for (const [k, t] of Object.entries(TRACKS)) {
-    if (!t.expr) continue;
-    const f = D('music', k + '_60.m4a');
-    if (!fs.existsSync(f)) await run('ffmpeg', ['-y', '-f', 'lavfi', '-i', `aevalsrc='${t.expr}':s=44100:d=60`, '-af', 'afade=in:d=0.5,afade=out:st=58:d=2', '-c:a', 'aac', f]);
-  }
+  const missing = Object.keys(TRACKS).filter(k => k !== 'none' && !MUSIC.fileFor(k));
+  if (missing.length) console.error('music files missing:', missing.join(', '));
 }
 async function ensureSample() {
   const f = D('uploads', 'sample.mp4'), A = n => path.join(__dirname, 'assets', n);
@@ -149,14 +142,14 @@ app.post('/api/generate', wrap(async (q, s) => {
 }));
 
 app.post('/api/render', wrap(async (q, s) => {
-  const { videoId, salon = '', track = 'velvet', tone = 'luxe' } = q.body;
+  const { videoId, salon = '', track = MUSIC.DEFAULT, tone = 'luxe' } = q.body;
   const f = videoPath(videoId), { duration: full, hasAudio } = await probe(f), duration = Math.min(full, 90);
   let lines = Array.isArray(q.body.lines) ? q.body.lines : [];
   lines = lines.every(l => typeof l === 'string') ? P.autoTime(lines.filter(x => x.trim()), duration) : P.cleanSegments(lines, duration, 'text');
   const rid = id(), ass = D('tmp', rid + '.ass'), out = D('renders', rid + '.mp4');
   fs.writeFileSync(ass, P.buildAss({ lines, salon, duration, tone: String(tone).toLowerCase() }));
   const vf = `scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30,subtitles=${ass}:fontsdir=/usr/share/fonts/truetype/dejavu`;
-  const music = TRACKS[track]?.expr ? D('music', track + '_60.m4a') : null;
+  const music = track === 'none' ? null : MUSIC.fileFor(track);
   const args = ['-y', '-i', f]; let map;
   if (music) { args.push('-stream_loop', '-1', '-i', music);
     map = hasAudio ? ['-filter_complex', '[0:a]volume=0.35[a0];[1:a]volume=0.8[a1];[a0][a1]amix=inputs=2:duration=first[a]', '-map', '0:v', '-map', '[a]'] : ['-map', '0:v', '-map', '1:a'];
