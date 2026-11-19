@@ -217,3 +217,17 @@ test('music library storage key passes storage.safeKey (Shotstack music upload)'
   const MUSIC = require('../music'), st = require('../storage');
   for (const id of Object.keys(MUSIC.TRACKS).filter(t => t !== 'none')) assert.doesNotThrow(() => st.safeKey(MUSIC.storageKey(id)));
 });
+
+test('#10 under the floor, usable clips the planner skipped are added in story order (live 237d5c8efd6b plan)', () => {
+  const S = require('../studio');
+  const shots = [{ id: 's1', type: 'detail' }, { id: 's2', type: 'styling' }, { id: 's3', type: 'detail' }, { id: 's4', type: 'reveal' }, { id: 's5', type: 'reveal' }];
+  const D = 5.042, clips = { s1: { duration: D }, s2: { duration: D }, s3: { duration: D }, s5: { duration: D } };
+  const qc = { clips: [{ shot_id: 's1', flags: [] }, { shot_id: 's2', flags: [{ kind: 'text_overlay', start_s: 0, end_s: 5 }] },
+    { shot_id: 's3', flags: [{ kind: 'letterbox', start_s: 0, end_s: 5 }], crop: { top: 0.16, bottom: 0.18 }, best: { start_s: 4, end_s: 5 } }, { shot_id: 's5', flags: [] }] };
+  const e = S.cleanEdit({ segments: [{ shot_id: 's1', in_s: 0, out_s: 5.04, speed: 1 }, { shot_id: 's5', in_s: 0, out_s: 5.04, speed: 0.8, transition_in: { type: 'dissolve', duration: 0.3 } }] },
+    { shots, clips, qc, music: 'velvet-house' });
+  assert.deepEqual(e.segments.map(s => s.shot_id), ['s1', 's3', 's5']);
+  assert.deepEqual(e.added_for_length, ['s3']);
+  assert.ok(e.total >= 15 && e.total <= 18.1, 'total ' + e.total);
+  assert.equal(e.segments[1].speed, 1);
+});
