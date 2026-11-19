@@ -127,7 +127,10 @@ function buildEditPayload({ edit, clips, clipUrls, musicUrl, profile = {}, crops
     if (zoomNote) approximations.push({ shot_id: sg.shot_id, kind: 'zoom', detail: zoomNote });
     if (Array.isArray(speedVal)) approximations.push({ shot_id: sg.shot_id, kind: 'speed_ramp', detail: 'ramp via Shotstack speed tween (half-source at each rate)' });
 
-    const asset = { type: 'video', src, trim: r2(srcStart), volume: 0 };
+    // Measured on a live sandbox render (2026-11-18, project 087001746bf9): with a speed set, Shotstack starts playback at
+    // source second trim x speed (frame SSIM 0.95 vs 0.19 for the documented reading). So trim = source start / first rate.
+    const rate0 = Array.isArray(speedVal) ? (+speedVal[0]?.from || 1) : (speedVal || 1);
+    const asset = { type: 'video', src, trim: r2(srcStart / rate0), volume: 0 };
     if (speedVal !== undefined) asset.speed = speedVal;
     const k = crops[sg.shot_id];
     if (k && (k.top || k.bottom || k.left || k.right)) {

@@ -136,7 +136,7 @@ describe('buildEditPayload', () => {
     assert.ok(Math.abs(last.start + last.length - meta.total) <= 0.011, 'timeline ends at plan total');
 
     assert.equal(vids[0].asset.trim, 0.5);
-    assert.equal(vids[1].asset.trim, 3);
+    assert.equal(vids[1].asset.trim, 2.31); // source 3.0s at speed 1.3 -> trim 3/1.3 (Shotstack starts at trim x speed)
     assert.equal(vids[1].asset.speed, 1.3);
     assert.ok(Array.isArray(vids[2].asset.speed));
     assert.equal(vids[2].effect, 'zoomInSlow');
@@ -292,5 +292,23 @@ describe('strictMode', () => {
     assert.equal(SS.strictMode({ SHOTSTACK_STRICT: '1' }), true);
     assert.equal(SS.strictMode({ SHOTSTACK_STRICT: 'true' }), true);
     assert.equal(SS.strictMode({}), false);
+  });
+});
+
+describe('trim vs speed (Shotstack starts at trim x speed)', () => {
+  const SS = require('../shotstack');
+  it('divides the source start by the playback rate', () => {
+    const edit = { segments: [
+      { shot_id: 'a', in_s: 0, out_s: 3.5, speed: 1, transition_in: { type: 'cut', duration: 0 }, zoom: { type: 'none' } },
+      { shot_id: 'b', in_s: 0, out_s: 4.5, speed: 1.5, transition_in: { type: 'cut', duration: 0 }, zoom: { type: 'none' } },
+      { shot_id: 'c', in_s: 1.47, out_s: 4.9, speed: 0.7, transition_in: { type: 'fade', duration: 0.5 }, zoom: { type: 'none' } }], overlays: [], total: 13 };
+    const clips = { a: { src_start: 15.7 }, b: { src_start: 24.1 }, c: { src_start: 43.4 } };
+    const clipUrls = { a: 'https://x/a.mp4', b: 'https://x/b.mp4', c: 'https://x/c.mp4' };
+    const { edit: payload } = SS.buildEditPayload({ edit, clips, clipUrls, musicUrl: null, profile: { salon: 'Olya Atelier' } });
+    const vids = payload.timeline.tracks.flatMap(t => t.clips).filter(c => c.asset.type === 'video');
+    const by = Object.fromEntries(vids.map(v => [v.asset.src.slice(-5, -4), v.asset]));
+    assert.equal(by.a.trim, 15.7);
+    assert.equal(by.b.trim, +(24.1 / 1.5).toFixed(2));
+    assert.equal(by.c.trim, +((43.4 + 1.47) / 0.7).toFixed(2));
   });
 });
