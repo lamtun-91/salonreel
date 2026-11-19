@@ -74,30 +74,43 @@ function zoomEffect(seg) {
   return { effect: undefined, note: null };
 }
 
-function mapTransitionIn(seg) {
-  const type = seg.transition_in?.type || 'cut';
-  if (type === 'cut' || !TRANSITION_MAP[type]) {
-    return { mapped: null, approx: type !== 'cut' && !TRANSITION_MAP[type] ? `unmapped transition ${type}` : null };
-  }
-  return { mapped: TRANSITION_MAP[type], approx: type === 'circleopen' ? 'circleopen→fade' : null };
+// Reels safe-area zones (1080x1920). Shotstack offsets are fractions of the output, +y = up from centre.
+const ZONES = {
+  brand: { centerY: 320, height: 90, width: 760, size: 44 },              // top band, below the IG header (~14%)
+  caption: { centerY: 1110, height: 240, width: 860, size: 60, x: -30 },  // lower band, above IG caption/UI (~35%), clear of right-side buttons
+};
+const yOff = cy => r2((960 - cy) / 1920);
+
+// Timeline layout identical to studio.layout: a non-cut transition overlaps the neighbours by its duration.
+function timelineLayout(segs) {
+  const durs = segs.map(segmentTimelineDuration), starts = [], ds = []; let t = 0;
+  segs.forEach((sg, i) => {
+    let d = 0;
+    if (i && (sg.transition_in?.type || 'cut') !== 'cut') d = Math.min(+sg.transition_in.duration || 0.4, durs[i] * 0.4, durs[i - 1] * 0.4);
+    t -= d; ds.push(r2(d)); starts.push(t); t += durs[i];
+  });
+  return { durs, starts, ds, total: t };
 }
 
 /**
  * Build a pure Shotstack Edit payload from a SalonReel edit plan.
+ * Transitions are true crossfades: the incoming clip sits on a higher track, overlaps the outgoing clip and
+ * tweens its opacity 0->1. Nothing fades through the background, and the timeline total equals the plan total.
  * @param {object} opts
  * @param {object} opts.edit - cleaned edit plan (segments, overlays, music_start_s, track, total)
  * @param {object} opts.clips - project.clips keyed by shot_id
  * @param {Record<string,string>} opts.clipUrls - shot_id -> public HTTPS URL
  * @param {string|null} opts.musicUrl - public HTTPS URL for the track (null if none)
  * @param {object} [opts.profile]
+ * @param {Record<string,{top?:number,bottom?:number,left?:number,right?:number}>} [opts.crops] - QC letterbox crops per shot
  * @returns {{ edit: object, meta: object }}
  */
-function buildEditPayload({ edit, clips, clipUrls, musicUrl, profile = {} }) {
+function buildEditPayload({ edit, clips, clipUrls, musicUrl, profile = {}, crops = {} }) {
   const approximations = [];
-  const videoClips = [];
-  let t = 0;
   const segs = Array.isArray(edit.segments) ? edit.segments : [];
   if (segs.length < 1) throw new Error('edit plan has no segments');
+  const lay = timelineLayout(segs);
+  const videoClips = [];
 
   for (let i = 0; i < segs.length; i++) {
     const sg = segs[i];
@@ -108,131 +121,99 @@ function buildEditPayload({ edit, clips, clipUrls, musicUrl, profile = {} }) {
 
     const srcStart = (+c.src_start || 0) + (+sg.in_s || 0);
     const srcLen = Math.max(0.05, (+sg.out_s || 0) - (+sg.in_s || 0));
-    const length = r2(segmentTimelineDuration(sg));
+    const length = r2(lay.durs[i]);
     const speedVal = buildSpeedAsset(sg, srcLen, length);
     const { effect, note: zoomNote } = zoomEffect(sg);
     if (zoomNote) approximations.push({ shot_id: sg.shot_id, kind: 'zoom', detail: zoomNote });
     if (Array.isArray(speedVal)) approximations.push({ shot_id: sg.shot_id, kind: 'speed_ramp', detail: 'ramp via Shotstack speed tween (half-source at each rate)' });
 
-    const asset = {
-      type: 'video',
-      src,
-      trim: r2(srcStart),
-      volume: 0,
-    };
+    const asset = { type: 'video', src, trim: r2(srcStart), volume: 0 };
     if (speedVal !== undefined) asset.speed = speedVal;
-
-    const clip = {
-      asset,
-      start: r2(t),
-      length,
-      fit: 'crop',
-    };
-
-    const tr = mapTransitionIn(sg);
-    if (tr.approx) approximations.push({ shot_id: sg.shot_id, kind: 'transition', detail: tr.approx });
-    if (i === 0) {
-      clip.transition = { in: 'fade' };
-    } else if (tr.mapped) {
-      clip.transition = { in: tr.mapped };
+    const k = crops[sg.shot_id];
+    if (k && (k.top || k.bottom || k.left || k.right)) {
+      asset.crop = Object.fromEntries(['top', 'bottom', 'left', 'right'].filter(x => k[x]).map(x => [x, r2(k[x])]));
+      approximations.push({ shot_id: sg.shot_id, kind: 'crop', detail: 'letterbox bars cropped before fill' });
     }
-    if (i === segs.length - 1) {
-      clip.transition = { ...(clip.transition || {}), out: 'fade' };
+
+    const clip = { asset, start: r2(lay.starts[i]), length, fit: 'crop' };
+    const d = lay.ds[i];
+    if (d > 0) {
+      clip.opacity = [{ from: 0, to: 1, start: 0, length: d, interpolation: 'linear' }];
+      const type = sg.transition_in?.type;
+      if (type && !['fade', 'dissolve'].includes(type)) approximations.push({ shot_id: sg.shot_id, kind: 'transition', detail: `${type}→crossfade (opacity tween)` });
     }
     if (effect) clip.effect = effect;
-
     videoClips.push(clip);
-    t += length;
   }
 
-  const total = r2(t);
-  approximations.push({
-    kind: 'timeline',
-    detail: 'non-overlapping sequential clips; Shotstack transition.in/out fades through background (not ffmpeg xfade crossfade)',
-  });
+  const total = r2(lay.total);
+  approximations.push({ kind: 'timeline', detail: 'overlapping clips on stacked tracks; crossfade = opacity tween on the incoming clip; no fade-through-background' });
 
-  const textClips = [];
+  const shadow = { offsetX: 0, offsetY: 3, blur: 10, color: '#000000', opacity: 0.75 };
+  const brandClips = [];
   const salon = String(profile.salon || '').trim();
   if (salon) {
-    textClips.push({
+    const z = ZONES.brand;
+    brandClips.push({
       asset: {
-        type: 'rich-text',
-        text: salon.slice(0, 60),
-        font: { family: 'Roboto', size: 42, weight: '700', color: '#ffffff' },
-        align: { horizontal: 'left', vertical: 'top' },
+        type: 'rich-text', text: salon.slice(0, 60),
+        font: { family: 'Roboto', size: z.size, weight: '700', color: '#ffffff' },
+        style: { letterSpacing: 3 },
+        stroke: { width: 2, color: '#000000', opacity: 0.6 }, shadow,
+        align: { horizontal: 'center', vertical: 'middle' },
       },
-      start: 0,
-      length: total,
-      width: 900,
-      height: 100,
-      position: 'top',
-      offset: { x: -0.05, y: -0.38 },
+      start: 0, length: total, width: z.width, height: z.height,
+      position: 'center', offset: { x: 0, y: yOff(z.centerY) },
     });
   }
 
+  const captionClips = [];
   const overlays = Array.isArray(edit.overlays) ? edit.overlays : [];
   for (const line of overlays) {
     const start = r2(Math.max(0, +line.start_s || 0));
     const end = r2(Math.min(total, +line.end_s || start + 1));
     const len = r2(Math.max(0.5, end - start));
     if (start >= total) continue;
-    textClips.push({
+    const z = ZONES.caption;
+    captionClips.push({
       asset: {
-        type: 'rich-text',
-        text: String(line.text || '').slice(0, 80),
-        font: { family: 'Roboto', size: 64, weight: '700', color: '#ffffff' },
+        type: 'rich-text', text: String(line.text || '').slice(0, 80),
+        font: { family: 'Roboto', size: z.size, weight: '700', color: '#ffffff' },
+        stroke: { width: 1, color: '#000000', opacity: 0.5 }, shadow,
+        background: { color: '#000000', opacity: 0.55, borderRadius: 18, wrap: true, padding: 22 },
         align: { horizontal: 'center', vertical: 'middle' },
       },
-      start,
-      length: Math.min(len, r2(total - start)),
-      width: 920,
-      height: 280,
-      position: 'center',
-      offset: { x: 0, y: 0.12 },
+      start, length: Math.min(len, r2(total - start)), width: z.width, height: z.height,
+      position: 'center', offset: { x: r2(z.x / 1080), y: yOff(z.centerY) },
       transition: { in: 'fade', out: 'fade' },
     });
   }
 
+  // Shotstack: first track renders on top. Text, then video clips with the latest clip highest so it crossfades in over the previous one.
   const tracks = [];
-  if (textClips.length) tracks.push({ clips: textClips });
-  tracks.push({ clips: videoClips });
+  if (captionClips.length) tracks.push({ clips: captionClips });
+  if (brandClips.length) tracks.push({ clips: brandClips });
+  for (let i = videoClips.length - 1; i >= 0; i--) tracks.push({ clips: [videoClips[i]] });
 
   if (musicUrl) {
     if (!/^https:\/\//i.test(musicUrl)) throw new Error('music URL must be a public https URL');
     tracks.push({
       clips: [{
-        asset: {
-          type: 'audio',
-          src: musicUrl,
-          trim: r1(Math.max(0, +edit.music_start_s || 0)),
-          volume: 0.85,
-          effect: 'fadeInFadeOut',
-        },
-        start: 0,
-        length: total,
+        asset: { type: 'audio', src: musicUrl, trim: r1(Math.max(0, +edit.music_start_s || 0)), volume: 0.85, effect: 'fadeOut' },
+        start: 0, length: total,
       }],
     });
   }
 
   const payload = {
-    timeline: {
-      background: '#000000',
-      tracks,
-    },
-    output: {
-      format: 'mp4',
-      size: { width: 1080, height: 1920 },
-      fps: 30,
-    },
+    timeline: { background: '#000000', tracks },
+    output: { format: 'mp4', size: { width: 1080, height: 1920 }, fps: 30 },
   };
 
   return {
     edit: payload,
     meta: {
-      provider: 'shotstack',
-      total,
-      segmentCount: videoClips.length,
-      approximations,
+      provider: 'shotstack', total, segmentCount: videoClips.length, approximations,
       // beat_markers / shot ids / QC stay out of the Shotstack payload
       omitted: ['beat_markers', 'shot_id', 'qc'],
     },
@@ -339,6 +320,8 @@ function strictMode(env = process.env) {
 
 module.exports = {
   TRANSITION_MAP,
+  ZONES,
+  timelineLayout,
   resolveProvider,
   apiBase,
   segmentTimelineDuration,

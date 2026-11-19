@@ -99,130 +99,120 @@ describe('segmentTimelineDuration', () => {
   });
 });
 
+const videoTracks = payload => payload.timeline.tracks.filter(t => t.clips[0]?.asset?.type === 'video');
+// video clips back in timeline order (tracks are stacked latest-on-top)
+const videoClipsInOrder = payload => videoTracks(payload).map(t => t.clips[0]).sort((a, b) => a.start - b.start);
+
 describe('buildEditPayload', () => {
-  it('builds a contiguous 9:16 payload with overlays, music, zooms, ramps', () => {
+  it('builds a 9:16 payload: crossfades by overlap + opacity tween, no fade through background', () => {
     const edit = fixtureEdit();
     const { edit: payload, meta } = SS.buildEditPayload({
-      edit,
-      clips: fixtureClips(),
-      clipUrls: fixtureUrls(),
-      musicUrl: 'https://cdn.example.com/velvet_60.m4a',
-      profile: { salon: 'Olya Atelier' },
+      edit, clips: fixtureClips(), clipUrls: fixtureUrls(),
+      musicUrl: 'https://cdn.example.com/velvet_60.m4a', profile: { salon: 'Olya Atelier' },
     });
-
     assert.equal(payload.output.format, 'mp4');
     assert.deepEqual(payload.output.size, { width: 1080, height: 1920 });
     assert.equal(payload.output.fps, 30);
-    assert.equal(payload.timeline.background, '#000000');
 
-    // tracks: text, video, audio
-    assert.equal(payload.timeline.tracks.length, 3);
-    const [textTrack, videoTrack, audioTrack] = payload.timeline.tracks;
-    assert.ok(textTrack.clips.some(c => c.asset.type === 'rich-text' && c.asset.text === 'Olya Atelier'));
-    assert.ok(textTrack.clips.some(c => c.asset.text === 'Ready for a change?'));
-
-    assert.equal(videoTrack.clips.length, 4);
-    // contiguous starts
-    let t = 0;
-    for (const c of videoTrack.clips) {
-      assert.equal(c.start, Math.round(t * 100) / 100);
-      assert.equal(c.fit, 'crop');
-      assert.equal(c.asset.volume, 0);
-      assert.equal(c.asset.type, 'video');
-      t += c.length;
+    const vids = videoClipsInOrder(payload);
+    assert.equal(vids.length, 4);
+    // later clips sit on higher tracks (earlier in the tracks array)
+    const vt = videoTracks(payload).map(t => t.clips[0].start);
+    assert.deepEqual(vt, [...vt].sort((a, b) => b - a));
+    for (const c of vids) {
+      assert.equal(c.fit, 'crop'); assert.equal(c.asset.volume, 0);
+      assert.equal(c.transition, undefined, 'no transition.in/out: those fade through the background');
     }
-    assert.equal(meta.total, Math.round(t * 100) / 100);
+    // cut: next starts exactly where previous ends; fade: overlap equals the opacity tween length
+    assert.equal(vids[1].start, Math.round((vids[0].start + vids[0].length) * 100) / 100);
+    assert.equal(vids[1].opacity, undefined);
+    for (const i of [2, 3]) {
+      const ov = Math.round((vids[i - 1].start + vids[i - 1].length - vids[i].start) * 100) / 100;
+      assert.ok(ov > 0.1, 'overlap');
+      assert.equal(vids[i].opacity[0].from, 0); assert.equal(vids[i].opacity[0].to, 1);
+      assert.ok(Math.abs(vids[i].opacity[0].length - ov) <= 0.011);
+    }
+    const last = vids[vids.length - 1];
+    assert.ok(Math.abs(last.start + last.length - meta.total) <= 0.011, 'timeline ends at plan total');
 
-    // trim includes clip.src_start + in_s
-    assert.equal(videoTrack.clips[0].asset.trim, 0.5); // 0 + 0.5
-    assert.equal(videoTrack.clips[1].asset.trim, 3); // 2 + 1
+    assert.equal(vids[0].asset.trim, 0.5);
+    assert.equal(vids[1].asset.trim, 3);
+    assert.equal(vids[1].asset.speed, 1.3);
+    assert.ok(Array.isArray(vids[2].asset.speed));
+    assert.equal(vids[2].effect, 'zoomInSlow');
+    assert.equal(vids[1].effect, 'zoomInFast');
 
-    // constant speed
-    assert.equal(videoTrack.clips[1].asset.speed, 1.3);
-    // ramp as tween array
-    assert.ok(Array.isArray(videoTrack.clips[2].asset.speed));
-    assert.equal(videoTrack.clips[2].asset.speed[0].from, 1);
-    assert.equal(videoTrack.clips[2].asset.speed[1].to, 0.5);
-    assert.equal(videoTrack.clips[2].effect, 'zoomInSlow');
-    assert.equal(videoTrack.clips[1].effect, 'zoomInFast');
+    const music = payload.timeline.tracks.find(t => t.clips[0]?.asset?.type === 'audio').clips[0];
+    assert.equal(music.asset.trim, 4.5); assert.equal(music.start, 0); assert.equal(music.length, meta.total);
 
-    // transitions
-    assert.equal(videoTrack.clips[0].transition.in, 'fade');
-    assert.equal(videoTrack.clips[2].transition.in, 'fade');
-    assert.equal(videoTrack.clips[3].transition.in, 'fade'); // fadewhite mapped
-    assert.equal(videoTrack.clips[3].transition.out, 'fade');
-
-    // music
-    const music = audioTrack.clips[0];
-    assert.equal(music.asset.type, 'audio');
-    assert.equal(music.asset.trim, 4.5);
-    assert.equal(music.start, 0);
-    assert.equal(music.length, meta.total);
-
-    // no leak of beat markers / shot ids into payload
     const blob = JSON.stringify(payload);
     assert.equal(blob.includes('beat_markers'), false);
     assert.equal(blob.includes('shot_id'), false);
     assert.equal(blob.includes('qc'), false);
-    assert.ok(meta.approximations.length >= 1);
+  });
+
+  it('total matches studio.layout / cleanEdit plan total (no extra seconds)', () => {
+    const clips = { s1: { duration: 5.04, src_start: 0 }, s2: { duration: 5.04, src_start: 0 }, s4: { duration: 5.04, src_start: 0 }, s5: { duration: 5.04, src_start: 0 } };
+    // the fa506846b2ab plan that rendered 14.10s for a 12.81s plan
+    const segments = [
+      { shot_id: 's1', in_s: 0.8, out_s: 3.8, speed: 0.8, ramp_to: null, zoom: { type: 'push_in', at_s: 0.75, scale: 1.12 }, transition_in: { type: 'cut', duration: 0 } },
+      { shot_id: 's2', in_s: 0.8, out_s: 4.18, speed: 1.5, ramp_to: null, zoom: { type: 'none', at_s: 0, scale: 1 }, transition_in: { type: 'dissolve', duration: 0.4 } },
+      { shot_id: 's4', in_s: 0.8, out_s: 2.15, speed: 1, ramp_to: null, zoom: { type: 'none', at_s: 0, scale: 1 }, transition_in: { type: 'smoothup', duration: 0.35 } },
+      { shot_id: 's5', in_s: 0.8, out_s: 4.85, speed: 0.6, ramp_to: null, zoom: { type: 'push_in', at_s: 1.5, scale: 1.1 }, transition_in: { type: 'fade', duration: 0.54 } }];
+    const urls = Object.fromEntries(Object.keys(clips).map(k => [k, `https://cdn.example.com/${k}.mp4`]));
+    const { meta, edit: payload } = SS.buildEditPayload({ edit: { segments, overlays: [] }, clips, clipUrls: urls, musicUrl: null });
+    assert.ok(Math.abs(meta.total - 12.81) <= 0.1, `total ${meta.total}`);
+    const vids = videoClipsInOrder(payload), last = vids[vids.length - 1];
+    assert.ok(Math.abs(last.start + last.length - 12.81) <= 0.1);
+  });
+
+  it('puts salon name and captions in separate zones inside the Reels safe area, with contrast', () => {
+    const { edit: payload } = SS.buildEditPayload({ edit: fixtureEdit(), clips: fixtureClips(), clipUrls: fixtureUrls(), musicUrl: null, profile: { salon: 'Olya Atelier' } });
+    const texts = payload.timeline.tracks.flatMap(t => t.clips).filter(c => c.asset.type === 'rich-text');
+    const brand = texts.find(c => c.asset.text === 'Olya Atelier'), caps = texts.filter(c => c !== brand);
+    assert.ok(brand && caps.length);
+    const band = c => { const cy = 960 - c.offset.y * 1920; return [cy - c.height / 2, cy + c.height / 2]; };
+    const [b0, b1] = band(brand);
+    for (const c of caps) {
+      const [c0, c1] = band(c);
+      assert.ok(c0 > b1 + 200, 'caption band well below the salon name band');
+      assert.ok(c1 <= 1920 * 0.65 + 1, 'caption above the bottom 35% IG UI');
+      assert.ok(c.asset.background && c.asset.background.opacity >= 0.4, 'caption backing');
+      assert.ok(c.asset.shadow);
+    }
+    assert.ok(b0 >= 1920 * 0.14 - 1, 'salon name below the top 14% IG header');
+    assert.ok(brand.asset.shadow || brand.asset.stroke);
+  });
+
+  it('applies QC letterbox crops to the asset', () => {
+    const { edit: payload } = SS.buildEditPayload({ edit: fixtureEdit(), clips: fixtureClips(), clipUrls: fixtureUrls(), musicUrl: null, crops: { s2: { top: 0.16, bottom: 0.18 } } });
+    const vids = videoClipsInOrder(payload);
+    assert.deepEqual(vids[1].asset.crop, { top: 0.16, bottom: 0.18 });
+    assert.equal(vids[0].asset.crop, undefined);
   });
 
   it('rejects non-https media urls', () => {
-    assert.throws(() => SS.buildEditPayload({
-      edit: fixtureEdit(),
-      clips: fixtureClips(),
-      clipUrls: { ...fixtureUrls(), s1: '/api/local/get?x=1' },
-      musicUrl: null,
-      profile: {},
-    }), /public https/);
-    assert.throws(() => SS.buildEditPayload({
-      edit: fixtureEdit(),
-      clips: fixtureClips(),
-      clipUrls: { ...fixtureUrls(), s1: 'http://cdn.example.com/s1.mp4' },
-      musicUrl: null,
-      profile: {},
-    }), /public https/);
+    assert.throws(() => SS.buildEditPayload({ edit: fixtureEdit(), clips: fixtureClips(), clipUrls: { ...fixtureUrls(), s1: '/api/local/get?x=1' }, musicUrl: null, profile: {} }), /public https/);
+    assert.throws(() => SS.buildEditPayload({ edit: fixtureEdit(), clips: fixtureClips(), clipUrls: { ...fixtureUrls(), s1: 'http://cdn.example.com/s1.mp4' }, musicUrl: null, profile: {} }), /public https/);
   });
 
   it('works without music track', () => {
-    const { edit: payload } = SS.buildEditPayload({
-      edit: { ...fixtureEdit(), track: 'none' },
-      clips: fixtureClips(),
-      clipUrls: fixtureUrls(),
-      musicUrl: null,
-      profile: { salon: 'Olya Atelier' },
-    });
-    assert.equal(payload.timeline.tracks.length, 2);
+    const { edit: payload } = SS.buildEditPayload({ edit: { ...fixtureEdit(), track: 'none' }, clips: fixtureClips(), clipUrls: fixtureUrls(), musicUrl: null, profile: { salon: 'Olya Atelier' } });
+    assert.equal(payload.timeline.tracks.some(t => t.clips[0].asset.type === 'audio'), false);
   });
 
   it('aligns with cleanEdit fixture durations', () => {
-    const clips = {
-      s1: { duration: 5, src_start: 0 },
-      s2: { duration: 6, src_start: 0 },
-      s3: { duration: 7, src_start: 0 },
-      s4: { duration: 8, src_start: 0 },
-      s5: { duration: 5, src_start: 0 },
-    };
+    const clips = { s1: { duration: 5, src_start: 0 }, s2: { duration: 6, src_start: 0 }, s3: { duration: 7, src_start: 0 }, s4: { duration: 8, src_start: 0 }, s5: { duration: 5, src_start: 0 } };
     const shots = [
-      { id: 's1', name: 'Before', type: 'before', target_s: 3 },
-      { id: 's2', name: 'Cut', type: 'cutting', target_s: 4 },
-      { id: 's3', name: 'Blow', type: 'blowdry', target_s: 4 },
-      { id: 's4', name: 'Reveal', type: 'reveal', target_s: 4 },
-      { id: 's5', name: 'Back', type: 'reveal', target_s: 3 },
-    ];
+      { id: 's1', name: 'Before', type: 'before', target_s: 3 }, { id: 's2', name: 'Cut', type: 'cutting', target_s: 4 },
+      { id: 's3', name: 'Blow', type: 'blowdry', target_s: 4 }, { id: 's4', name: 'Reveal', type: 'reveal', target_s: 4 },
+      { id: 's5', name: 'Back', type: 'reveal', target_s: 3 }];
     const qc = { clips: shots.map(s => ({ shot_id: s.id, best: { start_s: 0, end_s: s.target_s }, what_is_visible: s.name, issues: [] })) };
     const plan = S.mockEdit({ shots, clips, qc, music: 'velvet' });
     const urls = Object.fromEntries(shots.map(s => [s.id, `https://cdn.example.com/${s.id}.mp4`]));
-    const { edit: payload, meta } = SS.buildEditPayload({
-      edit: { ...plan, overlays: [{ start_s: 0.5, end_s: 2.5, text: 'Hook' }] },
-      clips,
-      clipUrls: urls,
-      musicUrl: 'https://cdn.example.com/m.m4a',
-      profile: { salon: 'Olya Atelier' },
-    });
-    const video = payload.timeline.tracks.find(t => t.clips[0]?.asset?.type === 'video');
-    assert.ok(video.clips.length >= 2);
-    assert.ok(meta.total > 10 && meta.total <= 30);
+    const { meta } = SS.buildEditPayload({ edit: { ...plan, overlays: [{ start_s: 0.5, end_s: 2.5, text: 'Hook' }] }, clips, clipUrls: urls, musicUrl: 'https://cdn.example.com/m.m4a', profile: { salon: 'Olya Atelier' } });
+    assert.ok(Math.abs(meta.total - plan.total) <= 0.05, `shotstack ${meta.total} vs plan ${plan.total}`);
+    assert.ok(meta.total >= 15 && meta.total <= 30);
   });
 });
 
