@@ -12,7 +12,7 @@ const sixQC = { clips: sixShots.map(s => ({ shot_id: s.id, flags: [], best: { st
 test('(a) master.js: loud mix -> about -14 LUFS, true peak <= -1 dBTP, video copied, same duration', async () => {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'mst-')), f = path.join(d, 'loud.mp4');
   execFileSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=gray:s=320x568:r=30:d=6', '-f', 'lavfi', '-i', 'sine=f=110:r=48000:d=6,volume=6',
-    '-f', 'lavfi', '-i', 'anoisesrc=d=6:c=pink:a=0.9:r=48000', '-filter_complex', '[1:a][2:a]amix=inputs=2:normalize=0[a]', '-map', '0:v', '-map', '[a]', '-c:v', 'libx264', '-c:a', 'aac', '-shortest', f]);
+    '-f', 'lavfi', '-i', 'anoisesrc=d=6:c=pink:a=0.9:r=48000', '-filter_complex', '[1:a][2:a]amix=inputs=2:normalize=0,aformat=channel_layouts=stereo,aresample=48000[a]', '-map', '0:v', '-map', '[a]', '-c:v', 'libx264', '-c:a', 'aac', '-shortest', f]);
   const before = await MASTER.measure(f);
   const r = await MASTER.masterFile(f);
   const after = await MASTER.measure(f);

@@ -20,7 +20,7 @@ async function measure(file) {
 }
 function pass2Filter(m, tp = TARGET.TP) {
   const r = m.raw;
-  return `loudnorm=I=${TARGET.I}:TP=${tp}:LRA=${TARGET.LRA}:measured_I=${r.input_i}:measured_TP=${r.input_tp}:measured_LRA=${r.input_lra}:measured_thresh=${r.input_thresh}:offset=${r.target_offset}:linear=true:print_format=json,aresample=48000`;
+  return `loudnorm=I=${TARGET.I}:TP=${tp}:LRA=${TARGET.LRA}:measured_I=${r.input_i}:measured_TP=${r.input_tp}:measured_LRA=${r.input_lra}:measured_thresh=${r.input_thresh}:offset=${r.target_offset}:linear=true:print_format=json,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo`;
 }
 // Returns { skipped?, before:{i,tp}, after:{i,tp} }. Rewrites `file` in place.
 async function masterFile(file, { tmp = file + '.master.mp4' } = {}) {

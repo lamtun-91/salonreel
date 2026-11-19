@@ -242,7 +242,7 @@ module.exports = ({ app, llm, parseJSON, run, probe, cfg, TRACKS, D, id, wrap })
     };
     delete p.consent; delete p.export;
   }
-  const RENDER_VERSION = 3; // bump when renderer output changes so cached variants are not reused
+  const RENDER_VERSION = 4; // bump when renderer output changes so cached variants are not reused
   const editSig = e => crypto.createHash('md5').update(JSON.stringify([RENDER_VERSION, e.segments, e.overlays, e.music_start_s, e.track])).digest('hex').slice(0, 12);
   async function renderProject(p, { music } = {}) {
     p.musicOn = music === undefined ? p.edit?.music !== false : !!music;
