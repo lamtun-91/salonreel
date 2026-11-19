@@ -140,7 +140,7 @@ module.exports = ({ app, llm, parseJSON, run, probe, cfg, TRACKS, D, id, wrap })
   async function ensureMusicUrl(p, track) {
     if (track === 'none') return null;
     const local = MUSIC.fileFor(track); if (!local) throw new Error('music file missing for track ' + track);
-    const key = `music/${path.basename(local)}`; // shared library object; presigned https GET for Shotstack
+    const key = MUSIC.storageKey(track); // shared library object; presigned https GET for Shotstack
     if (!(await st.exists(key))) await st.putFile(key, local, 'audio/mp4');
     return mediaUrl(key);
   }
@@ -276,7 +276,11 @@ module.exports = ({ app, llm, parseJSON, run, probe, cfg, TRACKS, D, id, wrap })
     const p = await load(q.params.id);
     if (!p.gaps?.ready && !q.body.force) throw new Error('Fix the gap report first (missing/reshoot shots), or continue anyway');
     const ctx = { shots: p.plan.shots, clips: p.clips, qc: p.qc, mood: p.inputs.mood, music: p.inputs.music, style: p.inputs.style };
-    p.edit = live() ? S.cleanEdit(parseJSON(await llm({ system: 'You are a short-form video editor. Reply with JSON only.', text: S.editPrompt(ctx) })), ctx) : S.mockEdit(ctx);
+    if (live()) {
+      const raw = parseJSON(await llm({ system: 'You are a short-form video editor. Reply with JSON only.', text: S.editPrompt(ctx) }));
+      console.log('edit plan from AI:', (raw.segments || []).map(x => x.shot_id + ' ' + x.in_s + '-' + x.out_s + ' x' + x.speed).join(' | '));
+      p.edit = S.cleanEdit(raw, ctx);
+    } else p.edit = S.mockEdit(ctx);
     p.edit.mode = live() ? 'live' : 'demo';
     const override = S.haircutOverride(q.body, p.qc);
     if (override) p.qc_override = override;

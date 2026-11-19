@@ -119,6 +119,12 @@ function cleanFlags(c, issues, duration) {
 // Time ranges the edit must not use. Letterbox is fixed by cropping, so it is not avoided.
 const avoidRanges = q => (q?.flags || []).filter(f => f.kind === 'text_overlay' || f.kind === 'blur').map(f => [f.start_s, f.end_s]);
 // largest sub-interval of [a,b] that does not touch any avoid range
+// The unflagged stretch of a clip that contains [a,b] (a,b already outside flagged ranges).
+function spanAround(a, b, dur, ranges) {
+  let lo = 0, hi = dur;
+  for (const [x, y] of ranges) { if (y <= a + 0.01) lo = Math.max(lo, y); if (x >= b - 0.01) hi = Math.min(hi, x); }
+  return [lo, hi];
+}
 function freeWindow(a, b, ranges) {
   let parts = [[a, b]];
   for (const [x, y] of ranges) parts = parts.flatMap(([p, q]) => (y <= p || x >= q) ? [[p, q]] : [[p, Math.min(q, x)], [Math.max(p, y), q]].filter(([u, v]) => v - u > 0.01));
@@ -221,6 +227,11 @@ Return JSON only:
  "beat_markers":[seconds on the final timeline where cuts should land],"music_start_s":0-20}
 Rules: total about ${pol.target_s}s (usable footage ${pol.usable_s}s; up to ${pol.max_s}s only if there is enough good footage; never over 30s; at least ${pol.floor_s}s when the footage allows). Never slow clips down or hold frames just to reach a length; a shorter reel is fine when footage is thin. Story order; the reveal last and longest; cuts on beats; first segment transition_in is "cut". Never use any part of a clip inside its avoid_ranges_s (garbled text, blur); skip a clip if nothing usable is left. Transitions are crossfades or cuts only.`;
 }
+// Lengthen a segment by `src` seconds of source footage: first past its out point, then before its in point (within unflagged footage).
+function grow(s, src) {
+  const o = Math.min(s.max_out, s.out_s + src); src -= o - s.out_s; s.out_s = r2(o);
+  if (src > 0.01) s.in_s = r2(Math.max(s.min_in ?? s.in_s, s.in_s - src));
+}
 function cleanEdit(j, { shots, clips, qc, music }) {
   const segs = [], dropped = [], qcBy = Object.fromEntries((qc?.clips || []).map(c => [c.shot_id, c]));
   for (const s of (Array.isArray(j.segments) ? j.segments : [])) {
@@ -235,13 +246,29 @@ function cleanEdit(j, { shots, clips, qc, music }) {
       if (!w || w[1] - w[0] < 0.8) { dropped.push({ shot_id: s.shot_id, reason: 'QC flagged the whole clip (' + (qcBy[s.shot_id].flags || []).map(f => f.kind).join(', ') + ')' }); continue; }
       [a, b] = w;
     }
-    const lim = avoid.length ? (freeWindow(a, c.duration, avoid) || [a, b])[1] : c.duration; // how far this segment may be extended
+    const [lo, lim] = spanAround(a, b, c.duration, avoid); // how far this segment may be extended (both ways) without touching flagged footage
     const speed = r2(clamp(s.speed || 1, 0.5, 2)), ramp_to = s.ramp_to ? r2(clamp(s.ramp_to, 0.5, 2)) : null;
     const zt = ['punch_in', 'push_in'].includes(s.zoom?.type) ? s.zoom.type : 'none';
     const tr = normTransition(s.transition_in?.type);
-    segs.push({ shot_id: s.shot_id, in_s: r2(a), out_s: r2(b), max_out: r2(Math.max(b, lim)), speed, ramp_to: ramp_to && ramp_to !== speed ? ramp_to : null,
+    segs.push({ shot_id: s.shot_id, in_s: r2(a), out_s: r2(b), min_in: r2(Math.min(a, lo)), max_out: r2(Math.max(b, lim)), speed, ramp_to: ramp_to && ramp_to !== speed ? ramp_to : null,
       zoom: { type: zt, at_s: r2(clamp(s.zoom?.at_s, 0, 10)), scale: r2(clamp(s.zoom?.scale || 1.15, 1, 1.3)) },
       transition_in: { type: segs.length ? tr : 'cut', duration: r2(clamp(s.transition_in?.duration || 0.4, 0.2, 0.8)) } });
+  }
+  // the AI sometimes returns too few segments: fill from the remaining usable clips (story order, reveal last), at normal speed
+  if (segs.length < 2) {
+    const have = new Set(segs.map(x => x.shot_id));
+    for (const sh of shots || []) {
+      const c = clips[sh.id]; if (!c || have.has(sh.id) || dropped.some(d => d.shot_id === sh.id)) continue;
+      const q = qcBy[sh.id] || {}; const w = freeWindow(0, c.duration, avoidRanges(q)); if (!w || w[1] - w[0] < 0.8) continue;
+      const pref = q.best && q.best.end_s - q.best.start_s >= 0.8 ? freeWindow(q.best.start_s, q.best.end_s, avoidRanges(q)) : null;
+      const [a, b] = pref && pref[1] - pref[0] >= 0.8 ? pref : w;
+      segs.push({ shot_id: sh.id, in_s: r2(a), out_s: r2(b), min_in: r2(w[0]), max_out: r2(w[1]), speed: 1, ramp_to: null, zoom: { type: 'none', at_s: 0, scale: 1 },
+        transition_in: { type: 'fade', duration: 0.4 }, filled: true });
+      have.add(sh.id);
+    }
+    const order = Object.fromEntries((shots || []).map((sh, i) => [sh.id, (sh.type === 'reveal' ? 1000 : 0) + i]));
+    segs.sort((x, y) => (order[x.shot_id] ?? 500) - (order[y.shot_id] ?? 500));
+    segs.forEach((x, i) => { if (!i) x.transition_in = { type: 'cut', duration: x.transition_in.duration }; else if (x.transition_in.type === 'cut' && x.filled) x.transition_in.type = 'fade'; });
   }
   if (segs.length < 2) throw new Error('Edit plan needs at least 2 usable clips' + (dropped.length ? ' (QC removed: ' + dropped.map(d => d.shot_id).join(', ') + ')' : ''));
   const outDur = s => { const len = s.out_s - s.in_s; return s.ramp_to ? len / 2 / s.speed + len / 2 / s.ramp_to : len / s.speed; };
@@ -253,7 +280,7 @@ function cleanEdit(j, { shots, clips, qc, music }) {
   // Slow-mo > 1s of screen time per 1s of footage is not used for growth: only clips at speed >= 1 or the reveal may grow.
   for (const s of [...segs].reverse()) { const need = pol.target_s - layout(segs, outDur).total; if (need <= 0.05) break;
     const rate = s.ramp_to || s.speed; if (rate < 1 && s !== segs[segs.length - 1]) continue;
-    s.out_s = r2(Math.min(s.max_out, s.out_s + need * rate)); }
+    grow(s, need * rate); }
   const timeline = layout(segs, outDur);
   // snap transition starts to beats (adjust previous segment's out point)
   const beats = beatGrid(music, timeline.total);
@@ -263,9 +290,11 @@ function cleanEdit(j, { shots, clips, qc, music }) {
     if (Math.abs(d) <= 0.3 && Math.abs(d) > 0.02) { const no = r2(p.out_s + d * (p.ramp_to || p.speed)); if (no <= c.duration && no - p.in_s >= 0.8) p.out_s = no; }
   }
   { const last = segs[segs.length - 1], need = pol.floor_s + 0.05 - layout(segs, outDur).total; // beat snapping may trim a little; top up the reveal tail only
-    if (need > 0) last.out_s = r2(Math.min(last.max_out, last.out_s + need * (last.ramp_to || last.speed))); }
+    if (need > 0) grow(last, need * (last.ramp_to || last.speed));
+    // still short: let any normal-speed clip give more real footage (never slow-mo)
+    for (const s of [...segs].reverse()) { const n2 = pol.floor_s + 0.05 - layout(segs, outDur).total; if (n2 <= 0) break; if ((s.ramp_to || s.speed) >= 1) grow(s, n2 * (s.ramp_to || s.speed)); } }
   if (layout(segs, outDur).total > pol.cap_s) throw new Error('Edit plan over 30s');
-  const tl = layout(segs, outDur); segs.forEach(x => delete x.max_out);
+  const tl = layout(segs, outDur); segs.forEach(x => { delete x.max_out; delete x.min_in; delete x.filled; });
   return { segments: segs, timeline: tl.starts.map((st, i) => ({ shot_id: segs[i].shot_id, start_s: r2(st), end_s: r2(st + tl.durs[i]) })), total: r2(tl.total),
     beat_markers: beats.filter(b => b <= tl.total), ...musicStart(j.music_start_s, music, tl.starts[tl.starts.length - 1]), track: music,
     duration_policy: pol,

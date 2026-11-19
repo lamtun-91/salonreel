@@ -190,3 +190,30 @@ test('duration policy: ~18s default, stretch to <=25s with plenty of usable foot
   assert.equal(S.usableSeconds({ a: { duration: 5 }, b: { duration: 5 } }, { clips: [{ shot_id: 'b', flags: [{ kind: 'text_overlay', start_s: 0, end_s: 5 }] }] }), 5);
   assert.match(S.editPrompt({ shots: [{ id: 's1', name: 'a', type: 'reveal' }], clips: { s1: { duration: 6 } }, qc: { clips: [] }, mood: 'Luxe', music: 'velvet-house', style: 'Reveal-only' }), /about 18s/);
 });
+
+test('cleanEdit fills from usable clips when the AI returns a single segment', () => {
+  const S = require('../studio');
+  const shots = [{ id: 's1', type: 'detail' }, { id: 's2', type: 'styling' }, { id: 's5', type: 'reveal' }];
+  const clips = { s1: { duration: 5 }, s2: { duration: 5 }, s5: { duration: 5 } };
+  const qc = { clips: [{ shot_id: 's1', flags: [] }, { shot_id: 's2', flags: [{ kind: 'text_overlay', start_s: 0, end_s: 5 }] }, { shot_id: 's5', flags: [] }] };
+  const e = S.cleanEdit({ segments: [{ shot_id: 's5', in_s: 0, out_s: 5 }] }, { shots, clips, qc, music: 'velvet-house' });
+  assert.deepEqual(e.segments.map(s => s.shot_id), ['s1', 's5']);
+  assert.equal(e.segments[0].transition_in.type, 'cut');
+});
+
+test('#10 growth extends clips backwards into unused footage to reach the 15s floor (live ff29b8e17c54 plan)', () => {
+  const S = require('../studio');
+  const shots = [{ id: 's1', type: 'detail' }, { id: 's2', type: 'styling' }, { id: 's4', type: 'styling' }, { id: 's5', type: 'reveal' }];
+  const D = 5.042, clips = { s1: { duration: D }, s2: { duration: D }, s4: { duration: D }, s5: { duration: D } };
+  const qc = { clips: [{ shot_id: 's1', flags: [], crop: { top: 0.16, bottom: 0.18 } }, { shot_id: 's2', flags: [{ kind: 'text_overlay', start_s: 0, end_s: 5 }] }, { shot_id: 's4', flags: [] }, { shot_id: 's5', flags: [] }] };
+  const e = S.cleanEdit({ segments: [{ shot_id: 's1', in_s: 0.8, out_s: 5.04, speed: 1 }, { shot_id: 's4', in_s: 2, out_s: 5.04, speed: 1, transition_in: { type: 'cut' } },
+    { shot_id: 's5', in_s: 2.5, out_s: 5.04, speed: 0.7, transition_in: { type: 'dissolve', duration: 0.4 } }] }, { shots, clips, qc, music: 'velvet-house' });
+  assert.ok(e.total >= 15 && e.total <= 18.1, 'total ' + e.total);
+  assert.ok(e.segments.every(s => s.in_s >= 0 && s.out_s <= D + 0.01));
+  assert.equal(e.segments[0].speed, 1); assert.equal(e.segments[1].speed, 1); // growth never adds slow-mo
+});
+
+test('music library storage key passes storage.safeKey (Shotstack music upload)', () => {
+  const MUSIC = require('../music'), st = require('../storage');
+  for (const id of Object.keys(MUSIC.TRACKS).filter(t => t !== 'none')) assert.doesNotThrow(() => st.safeKey(MUSIC.storageKey(id)));
+});

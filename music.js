@@ -18,4 +18,6 @@ const resolve = id => TRACKS[id] ? id : LEGACY[id] || DEFAULT;
 const fileFor = id => { const t = TRACKS[resolve(id)]; return t && t.file && fs.existsSync(t.file) ? t.file : null; };
 const bpmFor = id => TRACKS[resolve(id)]?.bpm || 100;
 const dropFor = id => TRACKS[resolve(id)]?.drop_s ?? null;
-module.exports = { manifest, TRACKS, LEGACY, DEFAULT, MOOD_LABEL, resolve, fileFor, bpmFor, dropFor };
+// Storage key for the shared library copy (must pass storage.safeKey, which only allows projects/<id>/...)
+const storageKey = id => 'projects/library/music/' + require('path').basename(fileFor(id) || (resolve(id) + '.m4a'));
+module.exports = { storageKey, manifest, TRACKS, LEGACY, DEFAULT, MOOD_LABEL, resolve, fileFor, bpmFor, dropFor };

@@ -64,4 +64,4 @@ async function ensureCors(origins) {
     return 'cors set';
   } catch (e) { return 'cors not set: ' + e.message; }
 }
-module.exports = { R2, presignPut, presignGet, verifyLocal, putFile, getFile, exists, putJSON, getJSON, listProjectIds, ensureCors, LOCAL, lp };
+module.exports = { safeKey, R2, presignPut, presignGet, verifyLocal, putFile, getFile, exists, putJSON, getJSON, listProjectIds, ensureCors, LOCAL, lp };
