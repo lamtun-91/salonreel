@@ -17,6 +17,36 @@ const { Readable } = require('stream');
 const BASE = 'https://api.heygen.com';
 const DEFAULT_TIMEOUT_MS = 30000;
 
+// ---------- engine + cost guard ----------
+// HeyGen API self-serve prices, USD per minute, billed by actual seconds generated
+// (https://help.heygen.com/en/articles/10060327-heygen-api-pricing-explained, read 2026-11-20).
+const RATES_PER_MIN = {
+  avatar_iii: { digital_twin: 0.60, studio_avatar: 0.99, photo_avatar: 0.99 },
+  avatar_iv: { photo_avatar: 2.31, digital_twin: 4.83, studio_avatar: 4.83 },
+  avatar_v: { digital_twin: 7.20 },
+};
+const DEFAULT_ENGINE = 'avatar_iii'; // cheapest; avatar_iv / avatar_v only via explicit HEYGEN_ENGINE
+const GUARD = Object.freeze({ maxUsd: 0.50, maxSeconds: 30, wordsPerSec: 2.2, padSeconds: 1.0 });
+// Conservative spoken length: slow pace (2.2 words/s) plus 1s for lead-in/out, so the estimate errs high.
+const estimateSeconds = script => { const w = String(script || '').trim().split(/\s+/).filter(Boolean).length; return Math.round((w / GUARD.wordsPerSec + GUARD.padSeconds) * 10) / 10; };
+function engineFor(o = {}, env = process.env) {
+  const e = String(o.engine || env.HEYGEN_ENGINE || DEFAULT_ENGINE).trim();
+  if (!RATES_PER_MIN[e]) throw new HeyGenError(`Unsupported HeyGen engine "${e}" (allowed: ${Object.keys(RATES_PER_MIN).join(', ')})`, { code: 'bad_engine' });
+  return e;
+}
+// Rate for engine + look type; an unknown look type is priced at the engine's most expensive row (errs high).
+function ratePerMin(engine, avatarType) { const r = RATES_PER_MIN[engine]; return r[avatarType] ?? Math.max(...Object.values(r)); }
+function estimateCost({ script, engine, avatar_type = 'studio_avatar' }) {
+  const seconds = estimateSeconds(script), rate = ratePerMin(engine, avatar_type);
+  return { engine, avatar_type, seconds, rate_per_min: rate, usd: Math.round(seconds / 60 * rate * 10000) / 10000 };
+}
+class CostGuardError extends Error { constructor(msg, est) { super(msg); this.name = 'CostGuardError'; this.status = 400; this.code = 'cost_guard'; this.estimate = est; } }
+function checkCost(est) {
+  if (est.seconds > GUARD.maxSeconds) throw new CostGuardError(`Script is about ${est.seconds}s; HeyGen renders are capped at ${GUARD.maxSeconds}s. Shorten the script.`, est);
+  if (est.usd > GUARD.maxUsd) throw new CostGuardError(`Estimated HeyGen cost $${est.usd.toFixed(2)} is over the $${GUARD.maxUsd.toFixed(2)} per-render cap (${est.engine}, ${est.seconds}s).`, est);
+  return est;
+}
+
 class HeyGenError extends Error {
   constructor(message, { status = 0, code = 'heygen_error', param = null } = {}) { super(message); this.name = 'HeyGenError'; this.status = status; this.code = code; this.param = param; }
 }
@@ -69,21 +99,27 @@ async function listVoices({ language = 'en', gender, limit = 20, ...o } = {}) {
 }
 
 // Build the POST /v3/videos body for a stock avatar speaking a script. No `test` field: v3 rejects unknown fields.
-function avatarVideoBody({ avatar_id, voice_id, script, engine, title, aspect_ratio = '9:16', resolution = '720p' }) {
+function avatarVideoBody({ avatar_id, voice_id, script, engine = DEFAULT_ENGINE, title, aspect_ratio = '9:16', resolution = '720p' }) {
   if (!avatar_id) throw new HeyGenError('avatar_id is required', { code: 'bad_request' });
   if (!voice_id) throw new HeyGenError('voice_id is required', { code: 'bad_request' });
   const s = String(script || '').trim(); if (!s) throw new HeyGenError('script is required', { code: 'bad_request' });
   if (s.length > 5000) throw new HeyGenError('script is over HeyGen\'s 5,000 character limit', { code: 'bad_request' });
   const b = { type: 'avatar', avatar_id, voice_id, script: s, aspect_ratio, resolution, ...(title ? { title: String(title).slice(0, 100) } : {}) };
-  if (engine) b.engine = { type: engine };
+  if (!RATES_PER_MIN[engine]) throw new HeyGenError(`Unsupported HeyGen engine "${engine}"`, { code: 'bad_engine' });
+  b.engine = { type: engine };
   return b;
 }
 async function createAvatarVideo(args, o = {}) {
   if (!spendAllowed(o, o.env)) throw new SpendBlockedError();
-  const body = avatarVideoBody(args);
+  const engine = engineFor({ engine: args.engine }, o.env || process.env);
+  const body = avatarVideoBody({ ...args, engine });
+  const est = estimateCost({ script: body.script, engine, avatar_type: args.avatar_type });
+  const log = o.log || (m => console.log(m));
+  try { checkCost(est); } catch (e) { log(`[heygen] REFUSED engine=${engine} est_s=${est.seconds} est_usd=${est.usd.toFixed(4)}: ${e.message}`); throw e; }
+  log(`[heygen] create avatar=${body.avatar_id} engine=${engine} est_s=${est.seconds} est_usd=${est.usd.toFixed(4)} rate_per_min=${est.rate_per_min}`);
   const j = await request('POST', '/v3/videos', { ...o, body, idempotencyKey: o.idempotencyKey });
   const d = j?.data || {}; if (!d.video_id) throw new HeyGenError('HeyGen did not return a video_id', { code: 'bad_response' });
-  return { video_id: d.video_id, status: d.status || 'pending' };
+  return { video_id: d.video_id, status: d.status || 'pending', engine, estimate: est };
 }
 async function getVideo(video_id, o = {}) {
   if (!/^[A-Za-z0-9_-]{4,128}$/.test(String(video_id))) throw new HeyGenError('bad video_id', { code: 'bad_request' });
@@ -114,4 +150,4 @@ async function download(url, dest, { timeoutMs = 5 * 60e3, fetchImpl = globalThi
   return dest;
 }
 
-module.exports = { BASE, HeyGenError, SpendBlockedError, key, spendAllowed, request, me, listPublicLooks, listVoices, avatarVideoBody, createAvatarVideo, getVideo, waitForVideo, download };
+module.exports = { BASE, RATES_PER_MIN, DEFAULT_ENGINE, GUARD, estimateSeconds, engineFor, ratePerMin, estimateCost, checkCost, CostGuardError, HeyGenError, SpendBlockedError, key, spendAllowed, request, me, listPublicLooks, listVoices, avatarVideoBody, createAvatarVideo, getVideo, waitForVideo, download };

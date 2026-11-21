@@ -33,7 +33,7 @@ test('m2: createAvatarVideo refuses to spend unless explicitly allowed (v3 has n
   const f = mockFetch(() => res(200, { data: { video_id: 'v1' } }));
   await assert.rejects(C.createAvatarVideo({ avatar_id: 'a', voice_id: 'v', script: 'hi' }, { fetchImpl: f, env }), e => e instanceof C.SpendBlockedError && e.code === 'spend_not_allowed');
   assert.equal(f.calls.length, 0);
-  const r = await C.createAvatarVideo({ avatar_id: 'Daphne_public_4', voice_id: 'vv', script: 'Trim every 8 weeks.' }, { fetchImpl: f, env, allowSpend: true });
+  const r = await C.createAvatarVideo({ avatar_id: 'Daphne_public_4', voice_id: 'vv', script: 'Trim every 8 weeks.' }, { fetchImpl: f, env, allowSpend: true, log: () => {} });
   assert.equal(r.video_id, 'v1');
   const body = JSON.parse(f.calls[0].init.body);
   assert.equal(f.calls[0].init.method, 'POST'); assert.equal(f.calls[0].url, 'https://api.heygen.com/v3/videos');
@@ -50,7 +50,7 @@ test('m2: avatarVideoBody validates inputs', () => {
 
 test('m2: 402 / 401 errors are friendly and never contain the key', async () => {
   const f402 = mockFetch(() => res(402, { error: { code: 'insufficient_credit', message: 'Not enough credits to render this video.' } }));
-  await assert.rejects(C.createAvatarVideo({ avatar_id: 'a', voice_id: 'v', script: 's' }, { fetchImpl: f402, env, allowSpend: true }),
+  await assert.rejects(C.createAvatarVideo({ avatar_id: 'a', voice_id: 'v', script: 's' }, { fetchImpl: f402, env, allowSpend: true, log: () => {} }),
     e => e.status === 402 && e.code === 'insufficient_credit' && /Nothing was charged/.test(e.message) && !e.message.includes(FAKE));
   const f401 = mockFetch(() => res(401, { error: { code: 'unauthorized', message: 'bad key' } }));
   await assert.rejects(C.me({ fetchImpl: f401, env }), e => e.status === 401 && !e.message.includes(FAKE));
@@ -110,7 +110,7 @@ test('m2: renderHeygen end-to-end with a mocked HeyGen (real ffmpeg), raw clip r
   const src = path.join(dir, 'fake_heygen.mp4');
   execFileSync('ffmpeg', ['-y', '-v', 'error', '-f', 'lavfi', '-i', 'color=c=0x806060:s=720x1280:r=25:d=4', '-f', 'lavfi', '-i', 'sine=f=220:d=4', '-shortest', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', src]);
   const calls = { create: 0 };
-  const hg = { engine: () => '', stockAvatarIds: () => ['Daphne_public_4'],
+  const hg = { engine: () => 'avatar_iii', stockAvatarIds: () => ['Daphne_public_4'],
     createVideo: async (b) => { calls.create++; calls.body = b; return { video_id: 'mock_vid_1', status: 'pending' }; },
     waitForVideo: async () => ({ status: 'completed', video_url: 'https://files.example/v.mp4', duration: 4 }),
     download: async (u, d) => { fs.copyFileSync(src, d); return d; } };
@@ -141,4 +141,37 @@ test('m2: Dockerfile copies every local module the server requires (M2 deploy on
   while (todo.length) { const f = todo.pop(); if (seen.has(f)) continue; seen.add(f);
     for (const m of fs.readFileSync(path.join(ROOT, f), 'utf8').matchAll(/require\('\.\/([\w.-]+?)(\.js)?'\)/g)) todo.push(m[1] + '.js'); }
   for (const f of seen) assert.ok(copied.has(f), `${f} is required but not COPYed in Dockerfile`);
+});
+
+const SCRIPT18 = "Growing your hair out? Don't skip trims. A tiny dusting every eight to ten weeks keeps ends healthy, so your length actually shows. Ask for a dusting, not a cut, at your next visit to Olya Atelier.";
+test('m2 cost: default request pins avatar_iii and never sends avatar_iv', async () => {
+  const f = mockFetch(() => res(200, { data: { video_id: 'v9' } }));
+  const logs = [];
+  for (const e of [{}, { HEYGEN_ENGINE: '' }, { HEYGEN_AVATAR_ENGINE: 'avatar_iv' }]) {
+    await C.createAvatarVideo({ avatar_id: 'Daphne_public_4', voice_id: 'vv', script: SCRIPT18 }, { fetchImpl: f, env: { ...env, ...e }, allowSpend: true, log: m => logs.push(m) });
+  }
+  for (const c of f.calls) { const b = JSON.parse(c.init.body); assert.deepEqual(b.engine, { type: 'avatar_iii' }); assert.doesNotMatch(c.init.body, /avatar_iv/); }
+  assert.deepEqual(C.avatarVideoBody({ avatar_id: 'a', voice_id: 'v', script: 's' }).engine, { type: 'avatar_iii' });
+  const HG = require('../heygen'); assert.equal(HG.engine({}), 'avatar_iii'); assert.equal(HG.engine({ HEYGEN_ENGINE: 'avatar_iv' }), 'avatar_iv');
+  assert.ok(logs.every(m => /engine=avatar_iii est_s=\d/.test(m) && /est_usd=0\.\d{4}/.test(m) && !m.includes(FAKE)), logs.join('\n'));
+  assert.throws(() => C.engineFor({}, { HEYGEN_ENGINE: 'turbo9' }), /Unsupported HeyGen engine/);
+});
+test('m2 cost: estimate is conservative and uses the docs rates', () => {
+  const e = C.estimateCost({ script: SCRIPT18, engine: 'avatar_iii' });
+  assert.equal(e.rate_per_min, 0.99); assert.equal(e.seconds, 17.8); // 37 words / 2.2 + 1s
+  assert.equal(e.usd, 0.2937);
+  assert.equal(C.ratePerMin('avatar_iii', 'digital_twin'), 0.60); assert.equal(C.ratePerMin('avatar_iv', 'mystery'), 4.83);
+  assert.equal(C.estimateSeconds('one two three four five six seven eight nine ten eleven'), 6);
+});
+test('m2 cost: refuses over $0.50 or over 30s before any network call', async () => {
+  const f = mockFetch(() => res(200, { data: { video_id: 'never' } }));
+  const long = Array(70).fill('word').join(' '); // ~32.8s
+  const logs = [];
+  await assert.rejects(C.createAvatarVideo({ avatar_id: 'a', voice_id: 'v', script: long }, { fetchImpl: f, env, allowSpend: true, log: m => logs.push(m) }), e => e instanceof C.CostGuardError && /capped at 30s/.test(e.message));
+  // ~17.8s on avatar_iv studio = ~$1.43 -> over the cap
+  await assert.rejects(C.createAvatarVideo({ avatar_id: 'a', voice_id: 'v', script: SCRIPT18, engine: 'avatar_iv' }, { fetchImpl: f, env, allowSpend: true, log: m => logs.push(m) }), e => e.code === 'cost_guard' && /over the \$0\.50/.test(e.message));
+  await assert.rejects(C.createAvatarVideo({ avatar_id: 'a', voice_id: 'v', script: SCRIPT18 }, { fetchImpl: f, env: { ...env, HEYGEN_ENGINE: 'avatar_v' }, allowSpend: true, log: m => logs.push(m) }), e => e.code === 'cost_guard');
+  assert.equal(f.calls.length, 0);
+  assert.equal(logs.filter(m => /^\[heygen\] REFUSED/.test(m)).length, 3);
+  assert.equal(Object.isFrozen(C.GUARD), true);
 });

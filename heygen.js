@@ -9,7 +9,7 @@ const STUB = !configured();
 // The v3 API has no test/sandbox flag (v1/v2 `test: true` was retired 2026-10-31). Kept for the config payload.
 const testMode = () => false;
 const TEST_MODE_NOTE = 'HeyGen v3 has no test mode; every render is billed. Renders require HEYGEN_ALLOW_SPEND=1.';
-const engine = () => process.env.HEYGEN_AVATAR_ENGINE || ''; // '' = HeyGen default for the look (stock looks may only support avatar_iii)
+const engine = (env = process.env) => C.engineFor({}, env); // avatar_iii (cheapest) unless HEYGEN_ENGINE says otherwise
 const stockAvatarIds = () => String(process.env.HEYGEN_STOCK_AVATAR_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
 const stub = x => ({ stub: true, ...x });
 async function createPhotoAvatar() { return stub({ group_id: null, status: 'training' }); } // M4 (twin creation needs Tung's OK)

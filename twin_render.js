@@ -25,11 +25,11 @@ async function renderHeygen(p, { hg, run, probeDuration, master, dir, getProduct
   let hgInfo = p.heygen && p.heygen.video_id && fs.existsSync(raw) ? p.heygen : null;
   if (!hgInfo) {
     const ids = heygenIds(p, hg, env);
-    const c = await hg.createVideo({ ...ids, script: p.script.text, engine: hg.engine() || undefined, aspect_ratio: '9:16', title: `SalonReel twin ${p.id}` }, hgOpts);
+    const c = await hg.createVideo({ ...ids, script: p.script.text, engine: hg.engine(), aspect_ratio: '9:16', title: `SalonReel twin ${p.id}` }, hgOpts);
     log({ created: c.video_id });
     const v = await hg.waitForVideo(c.video_id, { ...hgOpts, onPoll: x => log({ poll: x.status }) });
     await hg.download(v.video_url, raw, hgOpts);
-    hgInfo = { video_id: c.video_id, ...ids, heygen_duration: v.duration, at: new Date().toISOString() };
+    hgInfo = { video_id: c.video_id, ...ids, engine: c.engine || hg.engine(), estimate: c.estimate || null, heygen_duration: v.duration, at: new Date().toISOString() };
   }
   const clip = await probeDuration(raw);
   const total = A.twinTotal(clip);
