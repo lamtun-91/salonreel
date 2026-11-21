@@ -160,20 +160,66 @@ test('m2 cost: default request pins avatar_iii and never sends avatar_iv', async
 });
 test('m2 cost: estimate is conservative and uses the docs rates', () => {
   const e = C.estimateCost({ script: SCRIPT18, engine: 'avatar_iii' });
-  assert.equal(e.rate_per_min, 0.99); assert.equal(e.seconds, 17.8); // 37 words / 2.2 + 1s
-  assert.equal(e.usd, 0.2937);
+  assert.equal(e.rate_per_min, 0.99); assert.equal(e.seconds, 14.7); // 37 words / 3.0 * 1.15 + 0.5s
+  assert.equal(e.usd, 0.2426);
   assert.equal(C.ratePerMin('avatar_iii', 'digital_twin'), 0.60); assert.equal(C.ratePerMin('avatar_iv', 'mystery'), 4.83);
-  assert.equal(C.estimateSeconds('one two three four five six seven eight nine ten eleven'), 6);
+  assert.equal(C.estimateSeconds('one two three four five six seven eight nine ten eleven'), 4.7);
 });
 test('m2 cost: refuses over $0.50 or over 30s before any network call', async () => {
   const f = mockFetch(() => res(200, { data: { video_id: 'never' } }));
-  const long = Array(70).fill('word').join(' '); // ~32.8s
+  const long = Array(80).fill('word').join(' '); // 80/3*1.15+0.5 = 31.2s
   const logs = [];
   await assert.rejects(C.createAvatarVideo({ avatar_id: 'a', voice_id: 'v', script: long }, { fetchImpl: f, env, allowSpend: true, log: m => logs.push(m) }), e => e instanceof C.CostGuardError && /capped at 30s/.test(e.message));
-  // ~17.8s on avatar_iv studio = ~$1.43 -> over the cap
+  // ~14.7s on avatar_iv studio = ~$1.18 -> over the cap
   await assert.rejects(C.createAvatarVideo({ avatar_id: 'a', voice_id: 'v', script: SCRIPT18, engine: 'avatar_iv' }, { fetchImpl: f, env, allowSpend: true, log: m => logs.push(m) }), e => e.code === 'cost_guard' && /over the \$0\.50/.test(e.message));
   await assert.rejects(C.createAvatarVideo({ avatar_id: 'a', voice_id: 'v', script: SCRIPT18 }, { fetchImpl: f, env: { ...env, HEYGEN_ENGINE: 'avatar_v' }, allowSpend: true, log: m => logs.push(m) }), e => e.code === 'cost_guard');
   assert.equal(f.calls.length, 0);
   assert.equal(logs.filter(m => /^\[heygen\] REFUSED/.test(m)).length, 3);
   assert.equal(Object.isFrozen(C.GUARD), true);
+});
+
+// ---------- M2 follow-ups: speech calibration, Twin brand zone, 1080p ----------
+const SP = require('../speech');
+const P = require('../pipeline');
+test('m2 calib: one ~3 w/s calibration drives the script target, duration estimate and cost guard', () => {
+  assert.equal(SP.SPEECH.wordsPerSec, 3.0);
+  const s55 = Array(55).fill('word').join(' ');
+  assert.equal(A.estimateDuration(s55), 18.33); // 55 words ~ 18s reel
+  assert.equal(A.DURATION.target, 18); assert.equal(A.DURATION.words, 55); assert.equal(A.DURATION.max, C.GUARD.maxSeconds);
+  assert.match(A.draftPrompt({ template: 'tip', salon: 'Olya Atelier', mood: 'Clean', language: 'English' }), /about 55 words \(~18s/);
+  const g = C.estimateCost({ script: s55, engine: 'avatar_iii' });
+  assert.ok(g.seconds > A.estimateDuration(s55), 'guard stays more conservative than the estimate'); assert.equal(g.seconds, 21.6);
+  assert.ok(g.usd < C.GUARD.maxUsd);
+  // the measured M2 renders fit inside the guard estimate
+  assert.ok(SP.guardSeconds(Array(42).fill('w').join(' ')) >= 13.17); assert.ok(SP.guardSeconds(Array(39).fill('w').join(' ')) >= 14.55);
+  // mock drafts now land near 18s
+  for (const t of ['tip', 'faq', 'promo', 'booking']) { const d = A.mockDraft({ template: t, salon: 'Olya Atelier', avatar: { name: 'Olya' } }); assert.ok(d.total_s >= 15 && d.total_s <= 24, `${t} ${d.total_s}`); }
+});
+test('m2 brand: Twin brand sits in a bottom band clear of captions, AI label and product card', () => {
+  const a = A.buildTwinAss({ lines: [{ start_s: 0, end_s: 1, text: 'x' }], salon: 'Olya Atelier', duration: 2 });
+  const brand = a.split('\n').find(l => l.startsWith('Style: Brand,')).split(',');
+  assert.equal(brand[18], '2', 'bottom-centre alignment'); assert.equal(+brand[21], 1920 - A.TWIN_BRAND_ZONE.bottomY);
+  const brandTop = A.TWIN_BRAND_ZONE.bottomY - A.TWIN_BRAND_ZONE.size - 6;
+  const cardBottom = A.PRODUCT_CARD.y + A.PRODUCT_CARD.h + 2 * A.PRODUCT_CARD.pad;
+  assert.ok(A.AI_LABEL_ZONE.topY + A.AI_LABEL_ZONE.size < P.CAPTION_ZONE.bottomY - 3 * P.CAPTION_ZONE.size);
+  assert.ok(P.CAPTION_ZONE.bottomY < A.PRODUCT_CARD.y, 'captions above card');
+  assert.ok(cardBottom < brandTop, `card ${cardBottom} vs brand ${brandTop}`);
+  assert.ok(A.TWIN_BRAND_ZONE.bottomY <= 1760, 'brand stays above the very bottom edge');
+  const args = A.twinAssembleArgs({ talking: 'r.mp4', total: 10, assPath: '/tmp/a.ass', productFile: 'p.png', product: { slot_start_s: 1, slot_end_s: 3 }, out: 'o.mp4' });
+  assert.match(args[args.indexOf('-filter_complex') + 1], new RegExp(`scale=${A.PRODUCT_CARD.w}:${A.PRODUCT_CARD.h}:.*pad=iw\\+24:ih\\+24:12:12`));
+});
+test('m2 brand: Hair Reveal brand/caption overlay params are unchanged', () => {
+  const h = s => require('crypto').createHash('sha256').update(s).digest('hex');
+  const inp = { lines: [{ start_s: 0.5, end_s: 3.2, text: 'Fresh bob, soft ends' }, { start_s: 3.5, end_s: 7, text: 'Book at Olya Atelier' }], salon: 'Olya Atelier', duration: 18 };
+  assert.equal(h(P.buildAss({ ...inp, tone: 'clean' })), '7e002281237f18bc5fe187bc6cfb34915c0bb38b546c475f41922792d581a4e8');
+  assert.equal(h(P.buildAss({ ...inp, tone: 'luxe' })), 'f18251a2853e1bb76f0d182ddf2350cfa8b5bd37ea921b275629c0a1f80c3ef5');
+  assert.deepEqual(P.BRAND_ZONE, { topY: 285, size: 46 });
+  assert.deepEqual(P.CAPTION_ZONE, { bottomY: 1230, size: 66, marginL: 90, marginR: 160 });
+  assert.deepEqual(require('../shotstack').ZONES, { brand: { centerY: 320, height: 90, width: 760, size: 44 }, caption: { centerY: 1110, height: 240, width: 860, size: 60, x: -30 } });
+});
+test('m2 1080p: Twin HeyGen requests default to 1080p', async () => {
+  assert.equal(C.avatarVideoBody({ avatar_id: 'a', voice_id: 'v', script: 's' }).resolution, '1080p');
+  const f = mockFetch(() => res(200, { data: { video_id: 'v1080' } }));
+  await C.createAvatarVideo({ avatar_id: 'Daphne_public_4', voice_id: 'vv', script: 'Short tip.' }, { fetchImpl: f, env, allowSpend: true, log: () => {} });
+  assert.equal(JSON.parse(f.calls[0].init.body).resolution, '1080p');
 });

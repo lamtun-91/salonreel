@@ -13,6 +13,7 @@
 const fs = require('fs');
 const { pipeline } = require('stream/promises');
 const { Readable } = require('stream');
+const SP = require('./speech');
 
 const BASE = 'https://api.heygen.com';
 const DEFAULT_TIMEOUT_MS = 30000;
@@ -26,9 +27,9 @@ const RATES_PER_MIN = {
   avatar_v: { digital_twin: 7.20 },
 };
 const DEFAULT_ENGINE = 'avatar_iii'; // cheapest; avatar_iv / avatar_v only via explicit HEYGEN_ENGINE
-const GUARD = Object.freeze({ maxUsd: 0.50, maxSeconds: 30, wordsPerSec: 2.2, padSeconds: 1.0 });
-// Conservative spoken length: slow pace (2.2 words/s) plus 1s for lead-in/out, so the estimate errs high.
-const estimateSeconds = script => { const w = String(script || '').trim().split(/\s+/).filter(Boolean).length; return Math.round((w / GUARD.wordsPerSec + GUARD.padSeconds) * 10) / 10; };
+const GUARD = Object.freeze({ maxUsd: 0.50, maxSeconds: 30 });
+// Conservative spoken length from the shared calibration (speech.js): ~3 w/s, +15% and +0.5s so the estimate errs high.
+const estimateSeconds = script => SP.guardSeconds(script);
 function engineFor(o = {}, env = process.env) {
   const e = String(o.engine || env.HEYGEN_ENGINE || DEFAULT_ENGINE).trim();
   if (!RATES_PER_MIN[e]) throw new HeyGenError(`Unsupported HeyGen engine "${e}" (allowed: ${Object.keys(RATES_PER_MIN).join(', ')})`, { code: 'bad_engine' });
@@ -99,7 +100,7 @@ async function listVoices({ language = 'en', gender, limit = 20, ...o } = {}) {
 }
 
 // Build the POST /v3/videos body for a stock avatar speaking a script. No `test` field: v3 rejects unknown fields.
-function avatarVideoBody({ avatar_id, voice_id, script, engine = DEFAULT_ENGINE, title, aspect_ratio = '9:16', resolution = '720p' }) {
+function avatarVideoBody({ avatar_id, voice_id, script, engine = DEFAULT_ENGINE, title, aspect_ratio = '9:16', resolution = '1080p' }) {
   if (!avatar_id) throw new HeyGenError('avatar_id is required', { code: 'bad_request' });
   if (!voice_id) throw new HeyGenError('voice_id is required', { code: 'bad_request' });
   const s = String(script || '').trim(); if (!s) throw new HeyGenError('script is required', { code: 'bad_request' });

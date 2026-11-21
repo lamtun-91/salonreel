@@ -112,7 +112,7 @@ test('flag on: guardrails, approval gate, stub render with AI label, export cons
     assert.equal((await j(B, `/api/twin/projects/${p.id}/render`, {})).status, 400, 'render refused before a script exists');
     assert.equal((await j(B, `/api/twin/projects/${p.id}/draft`, {})).status, 202); assert.equal((await waitJob(B, p.id)).state, 'done');
     let q = (await j(B, `/api/twin/projects/${p.id}`)).body; assert.equal(q.status, 'awaiting_approval'); assert.equal(q.script.approved, false);
-    assert.ok(q.total_s >= 30 && q.total_s <= 45); assert.ok(q.broll.clips.length >= 1);
+    assert.ok(q.total_s >= A.DURATION.min && q.total_s <= A.DURATION.max, String(q.total_s)); // M2: ~18s Twin reels (15-30s) assert.ok(q.broll.clips.length >= 1);
     assert.equal((await j(B, `/api/twin/projects/${p.id}/render`, {})).status, 400, 'render refused before approval');
     assert.equal((await j(B, `/api/twin/projects/${p.id}/approve`, {})).status, 400, 'needs explicit approval');
     const blocked = await j(B, `/api/twin/projects/${p.id}/approve`, { approved: true, script: q.script.text + ' It cures scalp disease.' }); assert.equal(blocked.status, 400); assert.match(blocked.body.error, /medical/);
@@ -140,10 +140,13 @@ test('flag on: guardrails, approval gate, stub render with AI label, export cons
 test('buildTwinAss wraps buildAss unchanged and always adds the AI label outside brand/caption zones', () => {
   const args = { lines: [{ start_s: 0, end_s: 2, text: 'Hi' }], salon: 'Olya Atelier', duration: 30, tone: 'luxe' };
   const base = P.buildAss(args), a = A.buildTwinAss({ ...args, slates: [{ start_s: 0, end_s: 3, text: 'AI B-roll (stub)\nfoam' }] });
-  for (const line of base.trim().split('\n')) assert.ok(a.includes(line), line);
+  // every Hair Reveal line is kept except the Brand style, which Twin moves to a bottom band (off the presenter's face)
+  for (const line of base.trim().split('\n').filter(l => !l.startsWith('Style: Brand,'))) assert.ok(a.includes(line), line);
+  assert.match(a, new RegExp(`Style: Brand,[^\\n]*,2,90,90,${1920 - A.TWIN_BRAND_ZONE.bottomY},1`));
   assert.match(a, /Dialogue: 2,0:00:00\.00,0:00:30\.00,AILabel,,0,0,0,,AI-generated/); assert.match(a, /AI B-roll \(stub\)\\Nfoam/);
-  const brandBottom = P.BRAND_ZONE.topY + P.BRAND_ZONE.size + 20, capTop = P.CAPTION_ZONE.bottomY - 3 * P.CAPTION_ZONE.size;
-  assert.ok(A.AI_LABEL_ZONE.topY > brandBottom && A.AI_LABEL_ZONE.topY + A.AI_LABEL_ZONE.size < capTop);
+  const capTop = P.CAPTION_ZONE.bottomY - 3 * P.CAPTION_ZONE.size;
+  assert.ok(A.AI_LABEL_ZONE.topY > 250 && A.AI_LABEL_ZONE.topY + A.AI_LABEL_ZONE.size < capTop);
+  assert.ok(A.TWIN_BRAND_ZONE.bottomY - A.TWIN_BRAND_ZONE.size > P.CAPTION_ZONE.bottomY);
 });
 test('stub vendor clients make no network calls', async () => {
   const orig = global.fetch; let calls = 0; global.fetch = async () => { calls++; throw new Error('network'); };

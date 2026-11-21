@@ -4,12 +4,14 @@
 // Reuses pipeline.js buildAss / cleanSegments / noEmoji / zones (wrapped, never changed) and music.js. No vendor calls here.
 const P = require('./pipeline');
 const MUSIC = require('./music');
+const SP = require('./speech');
 
 const PATH = 'full_gen_ai';
 const SALON_SLUG = 'olya-atelier';
 const DEFAULT_SALON = 'Olya Atelier';
 const AI_LABEL = 'AI-generated';
-const DURATION = { min: 30, max: 45, target: 36 };
+// Twin reels: ~18s (about 55 words at the shared ~3 words/s calibration); 30s hard cap matches the HeyGen cost guard.
+const DURATION = { min: 15, max: 30, target: SP.SPEECH.targetSeconds, words: SP.SPEECH.targetWords };
 const TEMPLATES = [
   { id: 'tip', name: 'Tip', blurb: 'Share one quick hair-care tip.', example: 'A 30s tip: how often should I trim if I am growing my hair out?' },
   { id: 'faq', name: 'FAQ', blurb: 'Answer a question clients ask a lot.', example: 'FAQ: does balayage need toning between appointments, and how long does it last?' },
@@ -88,14 +90,14 @@ function draftPrompt({ template, prompt, mood, language, salon, avatar, hasProdu
   const t = TEMPLATES.find(x => x.id === template) || TEMPLATES[0];
   return `You write short talking-head Reels for a hair salon called ${salon}. Template: ${t.name} (${t.blurb}). Brief: ${prompt || t.example}
 Speaker: the salon's AI twin "${avatar?.name || 'host'}" (${avatar?.role || 'host'}), speaking to camera. Mood: ${mood}. Language: ${language}.
-Return JSON only: {"script":"spoken words, ${DURATION.min}-${DURATION.max}s at a natural pace","captions":[{"start_s":n,"end_s":n,"text":"short on-screen line"}],
+Return JSON only: {"script":"spoken words, about ${DURATION.words} words (~${DURATION.target}s at a natural pace; never over ${Math.floor(DURATION.max * SP.SPEECH.wordsPerSec * 0.85)} words)","captions":[{"start_s":n,"end_s":n,"text":"short on-screen line"}],
 "broll":[{"prompt":"generic salon atmosphere or process shot (station, dryer, foam, tools, interior) - no people's faces, no finished hairstyle","start_s":n,"end_s":n}],
 "product":${hasProduct ? '{"start_s":n,"end_s":n} (when the salon\'s real product photo is shown)' : 'null'},"caption":"Instagram caption","hashtags":["..."]}
 Rules: 1-3 B-roll beats of 3-5s each. Captions in order, 1-4s each, punchy, no emoji. Never describe a hair result, a before/after, a client's hair, medical claims, celebrities or minors. End with a booking CTA.`;
 }
 const r2 = x => Math.round(x * 100) / 100;
 const clamp = (x, a, b) => Math.min(b, Math.max(a, +x || 0));
-function estimateDuration(script) { const w = String(script || '').trim().split(/\s+/).filter(Boolean).length; return r2(clamp(w / 2.6, DURATION.min, DURATION.max)); }
+function estimateDuration(script) { return r2(clamp(SP.spokenSeconds(script), DURATION.min, DURATION.max)); }
 function cleanDraft(j, { hasProduct } = {}) {
   const script = P.noEmoji(String(j.script || '')).slice(0, 1200);
   const total = estimateDuration(script);
@@ -109,10 +111,10 @@ function cleanDraft(j, { hasProduct } = {}) {
 function mockDraft({ template, prompt, salon, avatar, hasProduct }) {
   const name = avatar?.name || 'your stylist';
   const S = {
-    tip: `Hi, I'm ${name} from ${salon}. Growing your hair out? You still need trims. Every ten to twelve weeks we take off just the split ends, so the length you keep actually looks healthy. Ask for a dusting, not a cut. Sleep on silk, use heat protectant every time, and book your next trim before you leave. See you soon at ${salon}. Book via the link in bio.`,
-    faq: `Hi, I'm ${name} from ${salon}. A question we hear every week: does balayage need toning? Usually a gloss every eight to ten weeks keeps the tone fresh and the shine up. Between visits, a purple shampoo once a week is plenty. Want a plan for your color? Book a consult with us at ${salon}. Link in bio.`,
-    promo: `Hi, I'm ${name} from ${salon}. Our gloss and blowout pairing is back for November. Weekday mornings only, while spots last. You get a shine gloss, a deep conditioning rinse, and a smooth blowout in one visit. Bring a friend and you both get a little extra care. Book now through the link in bio.`,
-    booking: `Hi, it's ${name} from ${salon}. Quick reminder: holiday weekends fill up fast. If you want color or a fresh trim before December parties, book now so you get the time that works for you. Weekday evenings are open this week. Tap the link in bio and we'll see you soon at ${salon}.`,
+    tip: `Hi, I'm ${name} from ${salon}. Growing your hair out? You still need trims. Every ten to twelve weeks we take off just the split ends, so your length actually looks healthy. Ask for a dusting, not a cut, sleep on silk, and use heat protectant. Book your next trim via the link in bio.`,
+    faq: `Hi, I'm ${name} from ${salon}. A question we hear every week: does balayage need toning? Usually a gloss every eight to ten weeks keeps the tone fresh and the shine up. Between visits, purple shampoo once a week is plenty. Want a color plan? Book a consult via the link in bio.`,
+    promo: `Hi, I'm ${name} from ${salon}. Our gloss and blowout pairing is back for November, weekday mornings only, while spots last. You get a shine gloss, a deep conditioning rinse, and a smooth blowout in one visit. Bring a friend and you both get extra care. Book now through the link in bio.`,
+    booking: `Hi, it's ${name} from ${salon}. Quick reminder: holiday weekends fill up fast. If you want color or a fresh trim before December parties, book now so you get a time that works. Weekday evenings are open this week. Tap the link in bio and we'll see you soon at ${salon}.`,
   };
   const script = S[template] || S.tip, total = estimateDuration(script);
   const lines = { tip: ['Growing it out? Still trim', 'Every 10-12 weeks', 'Ask for a dusting', 'Silk + heat protectant', 'Book via link in bio'],
@@ -142,11 +144,16 @@ function cleanApproval(body, p) {
 // ---------- stub assembly ----------
 // AI label sits top-left below the brand band (brand: centered, top at y=285 ~ 330; captions: bottom box ending y=1230). Always on.
 const AI_LABEL_ZONE = { x: 70, topY: 372, size: 34 };
+// Twin-only brand zone: a bottom band (centre, bottom edge at y=1720) so the salon name never lands on the presenter's face.
+// Layout top->bottom: AI label (372-420) | captions (box bottom 1230) | product card (1262-1586) | brand (1668-1720).
+// Hair Reveal keeps pipeline.js BRAND_ZONE (top band) untouched; only the Twin ASS swaps the Brand style.
+const TWIN_BRAND_ZONE = { bottomY: 1720, size: 46 };
 function assTime(t) { const h = Math.floor(t / 3600), m = Math.floor(t / 60) % 60, s = (t % 60).toFixed(2).padStart(5, '0'); return `${h}:${String(m).padStart(2, '0')}:${s}`; }
 const assEsc = s => String(s).replace(/[{}\\]/g, '').replace(/\n/g, '\\N');
 // wraps pipeline.buildAss (unchanged) with an always-on AI label and optional stub slate text
 function buildTwinAss({ lines, salon, duration, tone, slates = [], solidCaptions = false }) {
   let a = P.buildAss({ lines, salon, duration, tone });
+  a = a.replace(/\nStyle: Brand,[^\n]*/, `\nStyle: Brand,DejaVu Sans,${TWIN_BRAND_ZONE.size},&H00FFFFFF,&H00FFFFFF,&H00000000,&H78000000,1,0,0,0,100,100,4,0,1,3,3,2,90,90,${1920 - TWIN_BRAND_ZONE.bottomY},1`);
   // live avatar footage is often a bright studio backdrop: make the caption box near-opaque so white text stays legible
   if (solidCaptions) a = a.replace(/(\nStyle: Cap,[^\n]*?)&H50000000,&H50000000/, '$1&H20000000,&H20000000');
   const styles = `Style: AILabel,DejaVu Sans,${AI_LABEL_ZONE.size},&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,1,0,0,0,100,100,1,0,3,8,0,7,${AI_LABEL_ZONE.x},60,${AI_LABEL_ZONE.topY},1
@@ -190,7 +197,7 @@ const musicFor = (track, musicOn) => (musicOn === false || !track || track === '
 // bed ducked underneath (or speech only when music is off).
 const MUSIC_UNDER_SPEECH_DB = -20;
 // product card sits below the caption box (P.CAPTION_ZONE bottom 1230) so it never covers the presenter's face
-const PRODUCT_CARD = { w: 360, h: 380, y: 1262 };
+const PRODUCT_CARD = { w: 360, h: 300, y: 1262, pad: 12 }; // outer box 1262..1586 (h + 2*pad), above the Twin brand band
 function twinAssembleArgs({ talking, total, assPath, productFile, product, musicFile, musicStart = 0, out, fontsdir = '/usr/share/fonts/truetype/dejavu', ffEsc = s => s.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'") }) {
   if (!talking) throw new Error('talking-head file is required');
   const T = (+total).toFixed(3);
@@ -213,4 +220,4 @@ const twinTotal = (clipDuration, cap = DURATION.max) => r2(Math.max(1, Math.min(
 
 module.exports = { PATH, SALON_SLUG, DEFAULT_SALON, AI_LABEL, AI_LABEL_ZONE, DURATION, TEMPLATES, ROLES, BLOCK, checkText, checkAll, BlockedError,
   cardStatus, selectable, stubSeed, cardView, preselect, newAvatar, advanceStub, draftPrompt, cleanDraft, mockDraft, cleanApproval, estimateDuration,
-  buildTwinAss, stubTimeline, stubFfmpegArgs, musicFor, COLORS, twinAssembleArgs, twinTotal, MUSIC_UNDER_SPEECH_DB, PRODUCT_CARD };
+  buildTwinAss, stubTimeline, stubFfmpegArgs, musicFor, COLORS, twinAssembleArgs, twinTotal, MUSIC_UNDER_SPEECH_DB, PRODUCT_CARD, TWIN_BRAND_ZONE };
