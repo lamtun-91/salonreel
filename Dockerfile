@@ -3,7 +3,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg fonts-de
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci --omit=dev
-COPY server.js pipeline.js storage.js studio.js routes_studio.js shotstack.js music.js master.js avatar.js routes_avatar.js heygen.js runway.js ./
+COPY server.js pipeline.js storage.js studio.js routes_studio.js shotstack.js music.js master.js avatar.js routes_avatar.js heygen.js heygen_client.js twin_render.js runway.js ./
 COPY prompts ./prompts
 COPY assets ./assets
 COPY public ./public
