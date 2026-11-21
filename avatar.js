@@ -11,7 +11,8 @@ const SALON_SLUG = 'olya-atelier';
 const DEFAULT_SALON = 'Olya Atelier';
 const AI_LABEL = 'AI-generated';
 // Twin reels: ~18s (about 55 words at the shared ~3 words/s calibration); 30s hard cap matches the HeyGen cost guard.
-const DURATION = { min: 15, max: 30, target: SP.SPEECH.targetSeconds, words: SP.SPEECH.targetWords };
+const DURATION = { min: 15, max: 30, target: SP.SPEECH.targetSeconds, words: SP.SPEECH.targetWords,
+  minWords: 50, maxWords: Math.floor(30 * SP.SPEECH.wordsPerSec * 0.85) }; // maxWords (~76) is the existing prompt cap; it keeps the cost-guard estimate inside 30s / $0.50
 const TEMPLATES = [
   { id: 'tip', name: 'Tip', blurb: 'Share one quick hair-care tip.', example: 'A 30s tip: how often should I trim if I am growing my hair out?' },
   { id: 'faq', name: 'FAQ', blurb: 'Answer a question clients ask a lot.', example: 'FAQ: does balayage need toning between appointments, and how long does it last?' },
@@ -60,10 +61,11 @@ function stubSeed(now = new Date().toISOString()) {
       heygen_avatar_id: null, group_id: null, voice_id: null, consent: null, created_at: now, updated: now },
   ];
 }
-function cardView(a, lib) {
+function cardView(a, lib, opts = {}) {
   return { id: a.id, name: a.name, role: a.role, kind: a.kind, status: a.status, card_status: cardStatus(a.status), sample: a.kind === 'sample',
     label: a.kind === 'sample' ? 'Sample' : a.role === 'owner' ? 'Owner' : 'Stylist', thumbnail: a.thumbnail, preview: a.preview || null,
-    selectable: selectable(a), is_default: lib.default_avatar_id === a.id, is_last_used: lib.last_used_avatar_id === a.id, stub: !!a.stub, error: a.error || null };
+    selectable: selectable(a), is_default: lib.default_avatar_id === a.id, is_last_used: lib.last_used_avatar_id === a.id,
+    stub: Object.prototype.hasOwnProperty.call(opts, 'stub') ? !!opts.stub : !!a.stub, error: a.error || null };
 }
 // last-used if still ready, else default if ready, else none
 function preselect(lib, avatars) {
@@ -90,7 +92,7 @@ function draftPrompt({ template, prompt, mood, language, salon, avatar, hasProdu
   const t = TEMPLATES.find(x => x.id === template) || TEMPLATES[0];
   return `You write short talking-head Reels for a hair salon called ${salon}. Template: ${t.name} (${t.blurb}). Brief: ${prompt || t.example}
 Speaker: the salon's AI twin "${avatar?.name || 'host'}" (${avatar?.role || 'host'}), speaking to camera. Mood: ${mood}. Language: ${language}.
-Return JSON only: {"script":"spoken words, about ${DURATION.words} words (~${DURATION.target}s at a natural pace; never over ${Math.floor(DURATION.max * SP.SPEECH.wordsPerSec * 0.85)} words)","captions":[{"start_s":n,"end_s":n,"text":"short on-screen line"}],
+Return JSON only: {"script":"spoken words, about ${DURATION.words} words (~${DURATION.target}s at a natural pace; at least ${DURATION.minWords}, never over ${DURATION.maxWords} words)","captions":[{"start_s":n,"end_s":n,"text":"short on-screen line"}],
 "broll":[{"prompt":"generic salon atmosphere or process shot (station, dryer, foam, tools, interior) - no people's faces, no finished hairstyle","start_s":n,"end_s":n}],
 "product":${hasProduct ? '{"start_s":n,"end_s":n} (when the salon\'s real product photo is shown)' : 'null'},"caption":"Instagram caption","hashtags":["..."]}
 Rules: 1-3 B-roll beats of 3-5s each. Captions in order, 1-4s each, punchy, no emoji. Never describe a hair result, a before/after, a client's hair, medical claims, celebrities or minors. End with a booking CTA.`;
@@ -98,6 +100,81 @@ Rules: 1-3 B-roll beats of 3-5s each. Captions in order, 1-4s each, punchy, no e
 const r2 = x => Math.round(x * 100) / 100;
 const clamp = (x, a, b) => Math.min(b, Math.max(a, +x || 0));
 function estimateDuration(script) { return r2(clamp(SP.spokenSeconds(script), DURATION.min, DURATION.max)); }
+function expandPrompt(ctx, previous) {
+  const n = SP.words(previous);
+  return `${draftPrompt(ctx)}
+
+The last script was ${n} words, which is too short. Rewrite the complete spoken script to about ${DURATION.words} words (at least ${DURATION.minWords}, never over ${DURATION.maxWords}) so it runs about ${DURATION.target}s at a natural pace. Keep the same idea, tone, language, and a booking CTA. Return JSON only, same schema.`;
+}
+// Safe, deterministic sentences used only when an LLM draft is still under the 50-word floor after one re-prompt.
+const LENGTH_FILLERS = [
+  'A little regular care between visits makes a real difference in how your hair feels day to day.',
+  'We are happy to talk through a simple at-home routine that fits your week.',
+  'Come see us and we will find a time that works for you.',
+  'Please visit us soon so we can take good care of your hair.',
+];
+function trimScript(text, max = DURATION.maxWords) {
+  const parts = String(text || '').trim().split(/\s+/).filter(Boolean);
+  return parts.length <= max ? parts.join(' ') : parts.slice(0, max).join(' ');
+}
+function expandScript(text, { min = DURATION.minWords, max = DURATION.maxWords } = {}) {
+  let t = String(text || '').replace(/\s+/g, ' ').trim();
+  if (SP.words(t) > max) return trimScript(t, max);
+  if (SP.words(t) >= min) return t;
+  const ctaRe = /(?:\.\s*)?(?:Book|Tap(?: the link)?|Link in bio)[^]*$/i;
+  let head = t, tail = '';
+  const m = t.match(ctaRe);
+  if (m && m.index > 10) {
+    head = t.slice(0, m.index).trim();
+    tail = m[0].trim();
+    if (head && !/[.!?]$/.test(head)) head += '.';
+  }
+  let i = 0;
+  const joined = () => (head + (tail ? ' ' + tail : '')).replace(/\s+/g, ' ').trim();
+  while (SP.words(joined()) < min && i < LENGTH_FILLERS.length * 3) {
+    head = (head + ' ' + LENGTH_FILLERS[i % LENGTH_FILLERS.length]).trim();
+    i++;
+  }
+  t = joined();
+  if (SP.words(t) > max) t = trimScript(t, max);
+  if (SP.words(t) < min) {
+    while (SP.words(t) < min) t = (t + ' ' + LENGTH_FILLERS[LENGTH_FILLERS.length - 1]).trim();
+    if (SP.words(t) > max) t = trimScript(t, max);
+  }
+  return t;
+}
+function applyScriptLength(d, ctx = {}) {
+  const text = expandScript(d.script?.text || '');
+  return cleanDraft({
+    script: text,
+    captions: d.script?.captions,
+    broll: d.broll?.clips,
+    product: d.product_slot ? { start_s: d.product_slot.slot_start_s, end_s: d.product_slot.slot_end_s } : undefined,
+    caption: d.copy?.caption,
+    hashtags: d.copy?.hashtags,
+  }, ctx);
+}
+// LLM draft with a 50-word floor: one re-prompt if short, then a deterministic expansion. Never returns under minWords.
+async function writeAiDraft(ctx, llm, parseJSON) {
+  const accept = d => {
+    if (!d?.script?.text) return null;
+    const r = checkAll({ script: d.script.text, captions: d.script.captions, broll: d.broll.clips });
+    return r.ok ? d : null;
+  };
+  const once = async text => accept(cleanDraft(parseJSON(await llm({ system: 'You write short-form salon video scripts. Reply with JSON only.', effort: 'low', text })), ctx));
+  let first = null, second = null;
+  try { first = await once(draftPrompt(ctx)); } catch (e) { first = null; }
+  if (first && SP.words(first.script.text) >= DURATION.minWords) {
+    const d = applyScriptLength(first, ctx); d.mode = 'ai'; return d;
+  }
+  try { second = await once(expandPrompt(ctx, first?.script?.text || '')); } catch (e) { second = null; }
+  if (second && SP.words(second.script.text) >= DURATION.minWords) {
+    const d = applyScriptLength(second, ctx); d.mode = 'ai'; return d;
+  }
+  const base = second || first;
+  if (base) { const d = applyScriptLength(base, ctx); d.mode = 'ai'; return d; }
+  const d = mockDraft(ctx); d.mode = 'template'; return d;
+}
 function cleanDraft(j, { hasProduct } = {}) {
   const script = P.noEmoji(String(j.script || '')).slice(0, 1200);
   const total = estimateDuration(script);
@@ -122,11 +199,12 @@ function mockDraft({ template, prompt, salon, avatar, hasProduct }) {
     promo: ['Gloss + blowout is back', 'Weekday mornings only', 'Shine, care, smooth finish', 'Bring a friend', 'Book via link in bio'],
     booking: ['Holiday weekends fill fast', 'Color or trim before parties?', 'Weekday evenings open', 'Book now', 'Link in bio'] }[template] || [];
   const step = total / lines.length;
-  return cleanDraft({ script, captions: lines.map((t, i) => ({ start_s: r2(i * step + 0.2), end_s: r2((i + 1) * step - 0.2), text: t })),
+  const d = cleanDraft({ script, captions: lines.map((t, i) => ({ start_s: r2(i * step + 0.2), end_s: r2((i + 1) * step - 0.2), text: t })),
     broll: [{ prompt: 'Slow pan across an empty, softly lit salon styling station with brushes and a hairdryer', start_s: r2(total * 0.3), end_s: r2(total * 0.3 + 4) },
       { prompt: 'Close-up of warm foam lather in a backwash bowl, no faces', start_s: r2(total * 0.6), end_s: r2(total * 0.6 + 4) }],
     product: hasProduct ? { start_s: r2(total * 0.45), end_s: r2(total * 0.45 + 3) } : null,
     caption: `${(TEMPLATES.find(t => t.id === template) || TEMPLATES[0]).name} from ${salon}. Book via link in bio.`, hashtags: ['hairtips', 'salonlife', 'olyaatelier'] }, { hasProduct });
+  return applyScriptLength(d, { hasProduct });
 }
 // approval payload -> validated script/captions/broll/product (blocklist again)
 function cleanApproval(body, p) {
@@ -294,5 +372,5 @@ function promoAssembleArgs({ avatar, brolls = [], productFile, endCardDur = 2.5,
 }
 
 module.exports = { PATH, SALON_SLUG, DEFAULT_SALON, AI_LABEL, AI_LABEL_ZONE, DURATION, TEMPLATES, ROLES, BLOCK, checkText, checkAll, BlockedError,
-  cardStatus, selectable, stubSeed, cardView, preselect, newAvatar, advanceStub, draftPrompt, cleanDraft, mockDraft, cleanApproval, estimateDuration,
+  cardStatus, selectable, stubSeed, cardView, preselect, newAvatar, advanceStub, draftPrompt, expandPrompt, expandScript, applyScriptLength, writeAiDraft, cleanDraft, mockDraft, cleanApproval, estimateDuration,
   buildTwinAss, stubTimeline, stubFfmpegArgs, musicFor, COLORS, twinAssembleArgs, twinTotal, MUSIC_UNDER_SPEECH_DB, DEFAULT_OVERLAYS, cleanOverlays, TWIN_BRAND_ZONE, BRAND_PILL, brandPill, pillPath, PRODUCT_META, BROLL_PROMPTS, PROMO_FADE, promoTimeline, promoAssembleArgs, PRODUCT_ON_SURFACE, END_CARD };

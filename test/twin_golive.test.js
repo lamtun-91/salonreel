@@ -50,6 +50,26 @@ test('golive: twin creation is refused server-side (403) and only stock avatars 
   const html = fs.readFileSync(path.join(ROOT, 'public/twin.html'), 'utf8'); assert.match(html, /id="igCall"/); assert.match(html, /id="consent"/);
 });
 
+test('golive: stock avatar cards report stub=false when HeyGen is configured live', async () => {
+  const { srv: s1, B: b1 } = await twinApp();
+  try {
+    const off = (await j(b1, '/api/twin/avatars')).body;
+    assert.equal(off.stub, true);
+    assert.ok(off.avatars.every(a => a.sample && a.stub === true));
+  } finally { s1.close(); }
+  const { srv, B } = await twinApp({ hg: { configured: () => true } });
+  try {
+    const c = (await j(B, '/api/twin/config')).body;
+    assert.equal(c.heygenConfigured, true); assert.equal(c.stub, false);
+    const L = (await j(B, '/api/twin/avatars')).body;
+    assert.equal(L.stub, false, 'library stub reflects live mode');
+    assert.ok(L.avatars.length >= 1);
+    assert.ok(L.avatars.every(a => a.sample && a.stub === false), 'stock cards are not leftover stubs');
+    const one = await j(B, '/api/twin/avatars/' + L.avatars[0].id);
+    assert.equal(one.status, 200); assert.equal(one.body.stub, false);
+  } finally { srv.close(); }
+});
+
 // ---------- engine pins ----------
 test('golive: production pins avatar_iii and gen4_turbo; per-render guards unchanged', () => {
   const prod = { NODE_ENV: 'production' };

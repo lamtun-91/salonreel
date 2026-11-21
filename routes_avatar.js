@@ -42,12 +42,14 @@ function mount({ app, llm, parseJSON, run, cfg, TRACKS, D, id, wrap, slug = A.SA
   const saveLib = L => { L.updated = new Date().toISOString(); return st.putJSON(libKey, L); };
   const getAv = async aid => { okAid(aid); const L = await lib(); if (!L.avatar_ids.includes(aid)) throw err(404, 'Avatar not found');
     const a = await st.getJSON(avKey(aid)); if (A.advanceStub(a)) await st.putJSON(avKey(aid), a); return { a, L }; };
+  const cardStub = () => !hg.configured();
+  const viewAv = (a, L) => A.cardView(a, L, { stub: cardStub() });
   async function listCards() {
     const L = await lib(), avs = [];
     for (const aid of L.avatar_ids) { try { const a = await st.getJSON(avKey(aid)); if (A.advanceStub(a)) await st.putJSON(avKey(aid), a); if (creationEnabled(env) || a.kind === 'sample') avs.push(a); } catch {} }
     // owner/stylist first, Samples last
     avs.sort((x, y) => (x.kind === 'sample') - (y.kind === 'sample'));
-    return { avatars: avs.map(a => A.cardView(a, L)), default_avatar_id: L.default_avatar_id, last_used_avatar_id: L.last_used_avatar_id, preselected: A.preselect(L, avs), stub: true };
+    return { avatars: avs.map(a => viewAv(a, L)), default_avatar_id: L.default_avatar_id, last_used_avatar_id: L.last_used_avatar_id, preselected: A.preselect(L, avs), stub: cardStub() };
   }
 
   app.post(CREATION_ROUTES, (q, s, n) => creationEnabled(env) ? n() : s.status(403).json({ error: CREATION_OFF_MSG, creation: false }));
@@ -64,14 +66,14 @@ function mount({ app, llm, parseJSON, run, cfg, TRACKS, D, id, wrap, slug = A.SA
     const L = await lib(), a = A.newAvatar(q.body || {}, 'av_' + id(), undefined, trainMs);
     if (q.body.footage_key) { st.safeKey(q.body.footage_key); a.footage_key = q.body.footage_key; }
     a.training = await HG.createPhotoAvatar(); // stub, no network
-    await st.putJSON(avKey(a.id), a); L.avatar_ids.unshift(a.id); await saveLib(L); s.json(A.cardView(a, L)); }));
-  app.get('/api/twin/avatars/:aid', w(async (q, s) => { const { a, L } = await getAv(q.params.aid); s.json(A.cardView(a, L)); }));
+    await st.putJSON(avKey(a.id), a); L.avatar_ids.unshift(a.id); await saveLib(L); s.json(viewAv(a, L)); }));
+  app.get('/api/twin/avatars/:aid', w(async (q, s) => { const { a, L } = await getAv(q.params.aid); s.json(viewAv(a, L)); }));
   app.post('/api/twin/avatars/:aid/consent', w(async (q, s) => { const { a } = await getAv(q.params.aid); if (a.kind === 'sample') throw err(400, 'Sample avatars do not need consent');
     s.json({ stub: true, ...(await HG.consentUrl()), status: a.consent?.status || 'stub' }); }));
   app.patch('/api/twin/avatars/:aid', w(async (q, s) => { const { a, L } = await getAv(q.params.aid);
     if (a.kind === 'sample') throw err(400, 'Sample avatars cannot be renamed');
     const nm = String(q.body.name || '').replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, '').trim().slice(0, 40); if (!nm) throw err(400, 'Give the avatar a name');
-    a.name = nm; a.updated = new Date().toISOString(); await st.putJSON(avKey(a.id), a); s.json(A.cardView(a, L)); }));
+    a.name = nm; a.updated = new Date().toISOString(); await st.putJSON(avKey(a.id), a); s.json(viewAv(a, L)); }));
   app.post('/api/twin/avatars/:aid/default', w(async (q, s) => { const { a, L } = await getAv(q.params.aid);
     if (!A.selectable(a)) throw err(400, 'Only a ready avatar can be the default'); L.default_avatar_id = a.id; await saveLib(L); s.json(await listCards()); }));
   app.delete('/api/twin/avatars/:aid', w(async (q, s) => { const { a, L } = await getAv(q.params.aid);
@@ -154,9 +156,9 @@ function mount({ app, llm, parseJSON, run, cfg, TRACKS, D, id, wrap, slug = A.SA
   app.post('/api/twin/projects/:id/draft', job('draft', async p => { const chk = A.checkText(p.inputs.prompt, 'prompt'); if (!chk.ok) throw new A.BlockedError(chk); }, async p => {
     const ctx = { template: p.template, prompt: p.inputs.prompt, mood: p.inputs.mood, language: p.inputs.language, salon: p.profile.salon, avatar: p.avatar, hasProduct: false }; // product photo is for M3 B-roll, not the avatar script
     let d;
-    if (live()) { try { d = A.cleanDraft(parseJSON(await llm({ system: 'You write short-form salon video scripts. Reply with JSON only.', effort: 'low', text: A.draftPrompt(ctx) })), ctx);
-      if (!d.script.text || !A.checkAll({ script: d.script.text, captions: d.script.captions, broll: d.broll.clips }).ok) d = null; } catch (e) { console.error('twin draft AI failed, using template draft:', e.message); d = null; } }
-    if (!d) { d = A.mockDraft(ctx); d.mode = 'template'; } else d.mode = 'ai';
+    if (live()) { try { d = await A.writeAiDraft(ctx, llm, parseJSON); }
+      catch (e) { console.error('twin draft AI failed, using template draft:', e.message); d = null; } }
+    if (!d) { d = A.mockDraft(ctx); d.mode = 'template'; }
     p.script = { ...d.script, approved: false, approved_at: null, approved_by: null, mode: d.mode }; p.broll = d.broll; p.copy = d.copy; p.total_s = d.total_s;
     p.status = 'awaiting_approval'; await save(p);
   }));

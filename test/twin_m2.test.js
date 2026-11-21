@@ -190,6 +190,7 @@ test('m2 calib: one ~3 w/s calibration drives the script target, duration estima
   const s55 = Array(55).fill('word').join(' ');
   assert.equal(A.estimateDuration(s55), 18.33); // 55 words ~ 18s reel
   assert.equal(A.DURATION.target, 18); assert.equal(A.DURATION.words, 55); assert.equal(A.DURATION.max, C.GUARD.maxSeconds);
+  assert.equal(A.DURATION.minWords, 50); assert.equal(A.DURATION.maxWords, 76);
   assert.match(A.draftPrompt({ template: 'tip', salon: 'Olya Atelier', mood: 'Clean', language: 'English' }), /about 55 words \(~18s/);
   const g = C.estimateCost({ script: s55, engine: 'avatar_iii' });
   assert.ok(g.seconds > A.estimateDuration(s55), 'guard stays more conservative than the estimate'); assert.equal(g.seconds, 21.6);
