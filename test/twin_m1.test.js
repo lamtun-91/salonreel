@@ -180,6 +180,6 @@ test('stub vendor clients make no network calls', async () => {
 });
 test('no Grok/xAI branding in the Twin UI; Runway credit only in the UI', () => {
   const ui = fs.readFileSync(path.join(ROOT, 'public', 'twin.html'), 'utf8') + fs.readFileSync(path.join(ROOT, 'public', 'twin.js'), 'utf8');
-  assert.doesNotMatch(ui, /grok|xai|x\.ai/i); assert.match(ui, /href="https:\/\/runway\.com"[^>]*>Powered by Runway</);
+  assert.doesNotMatch(ui, /grok|xai|x\.ai/i); assert.match(ui, /href="https:\/\/runwayml\.com"[^>]*>Powered by Runway</);
   assert.doesNotMatch(A.buildTwinAss({ lines: [], salon: 'Olya Atelier', duration: 5 }), /Runway/);
 });

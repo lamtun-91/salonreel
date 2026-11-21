@@ -43,7 +43,7 @@ function mount({ app, llm, parseJSON, run, cfg, TRACKS, D, id, wrap, slug = A.SA
   app.get('/api/twin/config', (q, s) => s.json({ enabled: true, stub: true, templates: A.TEMPLATES, defaultSalon: A.DEFAULT_SALON, moods: S.MOODS,
     tracks: Object.entries(TRACKS).map(([k, v]) => ({ id: k, label: v.label, name: v.name, moodLabel: v.moodLabel, bpm: v.bpm })), defaultTrack: MUSIC.DEFAULT,
     heygenTest: HG.testMode(), heygenTestNote: HG.TEST_MODE_NOTE, heygenConfigured: HG.configured(), runwayConfigured: RW.configured(), llmLive: live(), consent: TWIN_CONSENT, igAiLabelReminder: IG_AI_REMINDER,
-    aiLabel: A.AI_LABEL, defaultOverlays: A.DEFAULT_OVERLAYS, duration: A.DURATION, poweredBy: { name: 'Runway', url: 'https://runway.com' } }));
+    aiLabel: A.AI_LABEL, defaultOverlays: A.DEFAULT_OVERLAYS, duration: A.DURATION, poweredBy: { name: 'Runway', text: 'Powered by Runway', url: 'https://runwayml.com' } }));
 
   app.get('/api/twin/avatars', w(async (q, s) => s.json(await listCards())));
   app.post('/api/twin/avatars/upload-url', w(async (q, s) => { // stub: a real signed PUT for the training clip, nothing is sent to HeyGen in M1
@@ -157,10 +157,17 @@ function mount({ app, llm, parseJSON, run, cfg, TRACKS, D, id, wrap, slug = A.SA
   const probeDuration = async f => { const o = await run('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', f]); return +String(o?.stdout ?? o).trim(); };
   async function renderLive(p, { musicOn = p.musicOn } = {}) {
     const dir = D('cache', p.id);
-    const r = await TR.renderHeygen(p, { hg: HG, run, probeDuration, master: MASTER.masterFile, dir, musicOn });
+    // M3: Promo gets Runway B-roll + product end card only when Runway is live (RUNWAY_LIVE=1 + key) and a product photo is stored.
+    let promo = null;
+    if (p.template === 'promo' && p.product?.key && RW.configured()) {
+      fs.mkdirSync(dir, { recursive: true });
+      const productFile = await st.getFile(p.product.key, path.join(dir, 'product' + path.extname(p.product.key)));
+      promo = { productFile, styleAStill: path.join(__dirname, 'assets', 'broll_countertop.jpg'), includeB: false };
+    }
+    const r = await TR.renderHeygen(p, { hg: HG, run, probeDuration, master: MASTER.masterFile, dir, musicOn, rw: promo ? RW : null, promo });
     p.heygen = r.heygen;
     const key = `projects/${p.id}/renders/${path.basename(r.out)}`; await st.putFile(key, r.out, 'video/mp4'); fs.unlinkSync(r.out);
-    return { key, duration: r.duration, music: r.music, track: r.track, loudness: r.loudness, overlays: r.overlays, ai_label: r.ai_label, stub: false, heygen_video_id: r.heygen.video_id, at: new Date().toISOString() };
+    return { key, duration: r.duration, music: r.music, track: r.track, loudness: r.loudness, overlays: r.overlays, ai_label: r.ai_label, stub: false, heygen_video_id: r.heygen.video_id, broll: r.broll || null, timeline: r.timeline ? r.timeline.segments.map(x => ({ kind: x.kind, start_s: x.start_s, end_s: x.end_s })) : null, at: new Date().toISOString() };
   }
   const renderAny = (p, o) => (HG.configured() && (p.avatar?.heygen_avatar_id || p.avatar?.sample)) ? renderLive(p, o) : renderStub(p, o);
 

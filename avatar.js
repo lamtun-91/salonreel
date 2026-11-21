@@ -239,6 +239,56 @@ function twinAssembleArgs({ talking, total, assPath, musicFile, musicStart = 0, 
 // Reel length for a HeyGen clip: the spoken clip's own length, capped at the Twin max.
 const twinTotal = (clipDuration, cap = DURATION.max) => r2(Math.max(1, Math.min(cap, +clipDuration || 0)));
 
+// ---------- M3: Promo = avatar segment -> Runway B-roll clip(s) -> product end card ----------
+// Prompts (Gen-4 Turbo image_to_video). Style a: the still is a clean, people-free salon surface; the clip ends on an empty spot
+// where OUR editor composites the salon's real product photo. Style b: the still is a frame of the HeyGen presenter; Runway animates
+// her lifting a product (the product itself is invented by the model, so it is never presented as the salon's real product).
+const BROLL_PROMPTS = Object.freeze({
+  a: 'Slow, smooth cinematic push-in across a clean, softly lit salon countertop of pale stone. Warm natural window light, shallow depth of field, a few out-of-focus salon tools at the edges. The camera settles on an empty, uncluttered patch of countertop in the lower centre of the frame and holds. No people, no hands, no text, no logos, no products.',
+  b: 'She lifts a hair product bottle into view and smiles warmly at the camera, holding it at chest height. Natural, gentle movement, steady camera, soft studio lighting. No text, no logos, no captions.',
+});
+const PROMO_FADE = 0.4;
+// ffmpeg args to grab a reference still (style b) from the HeyGen raw clip, sized for Runway's 720:1280 ratio
+const stillArgs = (raw, t, out) => ['-y', '-v', 'error', '-ss', String(t), '-i', raw, '-frames:v', '1', '-vf', 'scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280', '-q:v', '2', out];
+// Segment order + crossfade offsets. segments: [{kind:'avatar'|'broll'|'endcard', dur}] -> starts, xfade offsets, total
+function promoTimeline(segments, fade = PROMO_FADE) {
+  if (!segments.length || segments[0].kind !== 'avatar') throw new Error('Promo must start with the avatar segment');
+  const ends = segments[segments.length - 1].kind === 'endcard'; if (!ends) throw new Error('Promo must end with the product end card');
+  if (segments.slice(1, -1).some(x => x.kind !== 'broll')) throw new Error('Only B-roll clips may sit between the avatar and the end card');
+  let t = 0; const out = [];
+  segments.forEach((sg, i) => { const start = i === 0 ? 0 : t - fade; out.push({ ...sg, start_s: r2(start), end_s: r2(start + sg.dur), xfade_offset: i === 0 ? null : r2(start) }); t = start + sg.dur; });
+  return { segments: out, total: r2(t), fade };
+}
+const PRODUCT_ON_SURFACE = { w: 520, h: 620, y: 1060, fadeIn: 0.6 };   // style a composite (lower centre, on the empty surface)
+const END_CARD = { bg: '0xf3ece6', w: 760, h: 900, y: 420 };           // product photo end card
+function promoAssembleArgs({ avatar, brolls = [], productFile, endCardDur = 2.5, assPath, musicFile, musicStart = 0, out, fade = PROMO_FADE, fontsdir = '/usr/share/fonts/truetype/dejavu',
+  ffEsc = s => s.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'") }) {
+  if (!avatar?.file || !(avatar.dur > 0)) throw new Error('avatar segment is required');
+  if (!productFile) throw new Error('product photo is required for the end card');
+  const tl = promoTimeline([{ kind: 'avatar', dur: avatar.dur }, ...brolls.map(b => ({ kind: 'broll', dur: b.dur, style: b.style })), { kind: 'endcard', dur: endCardDur }], fade);
+  const T = tl.total.toFixed(3), N = s => `scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30,format=yuv420p`;
+  const args = ['-y', '-i', avatar.file]; let fc = `[0:v]trim=0:${avatar.dur},setpts=PTS-STARTPTS,${N()}[s0]`; let vi = 1;
+  brolls.forEach((b, i) => { args.push('-i', b.file); const bi = vi++;
+    fc += `;[${bi}:v]trim=0:${b.dur},setpts=PTS-STARTPTS,${N()}[br${i}]`;
+    if (b.composite) { args.push('-loop', '1', '-t', String(b.dur), '-i', productFile); const pi = vi++; const at = Math.max(0, b.dur - (b.compositeLast || 2.2)).toFixed(2);
+      fc += `;[${pi}:v]scale=${PRODUCT_ON_SURFACE.w}:${PRODUCT_ON_SURFACE.h}:force_original_aspect_ratio=decrease,format=rgba,fade=t=in:st=${at}:d=${PRODUCT_ON_SURFACE.fadeIn}:alpha=1[pc${i}];[br${i}][pc${i}]overlay=(W-w)/2:${PRODUCT_ON_SURFACE.y}-h/2:enable='gte(t,${at})',format=yuv420p[s${i + 1}]`; }
+    else fc += `;[br${i}]null[s${i + 1}]`; });
+  args.push('-f', 'lavfi', '-t', String(endCardDur), '-i', `color=c=${END_CARD.bg}:s=1080x1920:r=30`); const bgi = vi++;
+  args.push('-loop', '1', '-t', String(endCardDur), '-i', productFile); const ei = vi++;
+  const E = brolls.length + 1;
+  fc += `;[${ei}:v]scale=${END_CARD.w}:${END_CARD.h}:force_original_aspect_ratio=decrease,format=rgba[ep];[${bgi}:v][ep]overlay=(W-w)/2:${END_CARD.y}+(${END_CARD.h}-h)/2,setsar=1,fps=30,format=yuv420p[s${E}]`;
+  let last = '[s0]';
+  for (let i = 1; i <= E; i++) { fc += `;${last}[s${i}]xfade=transition=fade:duration=${fade}:offset=${tl.segments[i].xfade_offset}[x${i}]`; last = `[x${i}]`; }
+  fc += `;${last}subtitles='${ffEsc(assPath)}':fontsdir=${fontsdir},format=yuv420p[vout]`;
+  fc += `;[0:a]atrim=0:${avatar.dur},asetpts=PTS-STARTPTS,aformat=sample_rates=44100:channel_layouts=stereo,afade=t=out:st=${Math.max(0, avatar.dur - 0.3).toFixed(2)}:d=0.3,apad,atrim=0:${T}[sp]`;
+  if (musicFile) { args.push('-ss', String(musicStart), '-i', musicFile); const mi = vi++;
+    // music sits under the voice, then comes up for the B-roll and end card
+    fc += `;[${mi}:a]aformat=sample_rates=44100:channel_layouts=stereo,volume='if(lt(t,${avatar.dur}),${Math.pow(10, MUSIC_UNDER_SPEECH_DB / 20).toFixed(3)},0.35)':eval=frame,apad,atrim=0:${T},afade=t=out:st=${Math.max(0, tl.total - 1).toFixed(3)}:d=1[mu];[sp][mu]amix=inputs=2:duration=first:normalize=0[aout]`; }
+  else fc += ';[sp]anull[aout]';
+  args.push('-filter_complex', fc, '-map', '[vout]', '-map', '[aout]', '-t', T, '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '21', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '160k', '-ar', '44100', '-movflags', '+faststart', out);
+  return { args, timeline: tl };
+}
+
 module.exports = { PATH, SALON_SLUG, DEFAULT_SALON, AI_LABEL, AI_LABEL_ZONE, DURATION, TEMPLATES, ROLES, BLOCK, checkText, checkAll, BlockedError,
   cardStatus, selectable, stubSeed, cardView, preselect, newAvatar, advanceStub, draftPrompt, cleanDraft, mockDraft, cleanApproval, estimateDuration,
-  buildTwinAss, stubTimeline, stubFfmpegArgs, musicFor, COLORS, twinAssembleArgs, twinTotal, MUSIC_UNDER_SPEECH_DB, DEFAULT_OVERLAYS, cleanOverlays, TWIN_BRAND_ZONE, BRAND_PILL, brandPill, pillPath, PRODUCT_META };
+  buildTwinAss, stubTimeline, stubFfmpegArgs, musicFor, COLORS, twinAssembleArgs, twinTotal, MUSIC_UNDER_SPEECH_DB, DEFAULT_OVERLAYS, cleanOverlays, TWIN_BRAND_ZONE, BRAND_PILL, brandPill, pillPath, PRODUCT_META, BROLL_PROMPTS, PROMO_FADE, stillArgs, promoTimeline, promoAssembleArgs, PRODUCT_ON_SURFACE, END_CARD };
