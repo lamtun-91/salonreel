@@ -260,7 +260,7 @@ function promoTimeline(segments, fade = PROMO_FADE) {
   return { segments: out, total: r2(t), fade };
 }
 const PRODUCT_ON_SURFACE = { w: 520, h: 620, y: 1060, fadeIn: 0.6 };   // style a composite (lower centre, on the empty surface)
-const END_CARD = { bg: '0xf3ece6', w: 760, h: 900, y: 420 };           // product photo end card
+const END_CARD = { bg: '0xf3ece6', w: 760, h: 900, y: 420, shadowH: 72, shadowAlpha: 0.5, shadowBlur: 18 }; // soft contact shadow under the product           // product photo end card
 function promoAssembleArgs({ avatar, brolls = [], productFile, endCardDur = 2.5, assPath, musicFile, musicStart = 0, out, fade = PROMO_FADE, fontsdir = '/usr/share/fonts/truetype/dejavu',
   ffEsc = s => s.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'") }) {
   if (!avatar?.file || !(avatar.dur > 0)) throw new Error('avatar segment is required');
@@ -277,7 +277,13 @@ function promoAssembleArgs({ avatar, brolls = [], productFile, endCardDur = 2.5,
   args.push('-f', 'lavfi', '-t', String(endCardDur), '-i', `color=c=${END_CARD.bg}:s=1080x1920:r=30`); const bgi = vi++;
   args.push('-loop', '1', '-t', String(endCardDur), '-i', productFile); const ei = vi++;
   const E = brolls.length + 1;
-  fc += `;[${ei}:v]scale=${END_CARD.w}:${END_CARD.h}:force_original_aspect_ratio=decrease,format=rgba[ep];[${bgi}:v][ep]overlay=(W-w)/2:${END_CARD.y}+(${END_CARD.h}-h)/2,setsar=1,fps=30,format=yuv420p[s${E}]`;
+  // end card: product photo centred, with a soft contact shadow under its base (built from the cutout's own alpha, so it follows the silhouette width)
+  const SH = END_CARD.shadowH;
+  const SB = END_CARD.shadowBlur, S3 = Math.round(SH / 3);
+  fc += `;[${ei}:v]scale=${END_CARD.w}:${END_CARD.h}:force_original_aspect_ratio=decrease,format=rgba,split[ep][es]` +
+    `;[es]crop=iw:ih*0.04:0:ih*0.96,colorchannelmixer=rr=0:gg=0:bb=0:aa=${END_CARD.shadowAlpha},scale=iw*0.95:${S3},pad=iw+80:${SH}:40:${S3}:black@0,boxblur=${SB}:2:${SB}:2:${SB}:2[esh]` +
+    `;[ep]pad=iw+80:ih+${SH}:40:0:black@0,split[pa][pb];[pb]colorchannelmixer=aa=0[blank];[blank][esh]overlay=(W-w)/2:H-${Math.round(SH * 1.5)}:format=rgb[shc];[shc][pa]overlay=0:0:format=rgb[epc]` +
+    `;[${bgi}:v][epc]overlay=(W-w)/2:${END_CARD.y}+(${END_CARD.h}+${SH}-h)/2,setsar=1,fps=30,format=yuv420p[s${E}]`;
   let last = '[s0]';
   for (let i = 1; i <= E; i++) { fc += `;${last}[s${i}]xfade=transition=fade:duration=${fade}:offset=${tl.segments[i].xfade_offset}[x${i}]`; last = `[x${i}]`; }
   fc += `;${last}subtitles='${ffEsc(assPath)}':fontsdir=${fontsdir},format=yuv420p[vout]`;
