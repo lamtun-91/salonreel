@@ -43,7 +43,7 @@ function mount({ app, llm, parseJSON, run, cfg, TRACKS, D, id, wrap, slug = A.SA
   app.get('/api/twin/config', (q, s) => s.json({ enabled: true, stub: true, templates: A.TEMPLATES, defaultSalon: A.DEFAULT_SALON, moods: S.MOODS,
     tracks: Object.entries(TRACKS).map(([k, v]) => ({ id: k, label: v.label, name: v.name, moodLabel: v.moodLabel, bpm: v.bpm })), defaultTrack: MUSIC.DEFAULT,
     heygenTest: HG.testMode(), heygenTestNote: HG.TEST_MODE_NOTE, heygenConfigured: HG.configured(), runwayConfigured: RW.configured(), llmLive: live(), consent: TWIN_CONSENT, igAiLabelReminder: IG_AI_REMINDER,
-    aiLabel: A.AI_LABEL, duration: A.DURATION, poweredBy: { name: 'Runway', url: 'https://runway.com' } }));
+    aiLabel: A.AI_LABEL, defaultOverlays: A.DEFAULT_OVERLAYS, duration: A.DURATION, poweredBy: { name: 'Runway', url: 'https://runway.com' } }));
 
   app.get('/api/twin/avatars', w(async (q, s) => s.json(await listCards())));
   app.post('/api/twin/avatars/upload-url', w(async (q, s) => { // stub: a real signed PUT for the training clip, nothing is sent to HeyGen in M1
@@ -105,10 +105,16 @@ function mount({ app, llm, parseJSON, run, cfg, TRACKS, D, id, wrap, slug = A.SA
       profile: { salon: String(b.salon || A.DEFAULT_SALON).slice(0, 60) || A.DEFAULT_SALON },
       inputs: { mood: S.MOODS.includes(b.mood) ? b.mood : S.MOODS[0], music: TRACKS[b.music] ? b.music : MUSIC.DEFAULT, language: String(b.language || 'English').slice(0, 30), prompt: String(b.prompt || '').slice(0, 600) },
       avatar_id: a.id, avatar: { id: a.id, name: a.name, role: a.role, kind: a.kind, sample: a.kind === 'sample', thumbnail: a.thumbnail, stub: !!a.stub, heygen_avatar_id: a.heygen_avatar_id || null, voice_id: a.voice_id || null },
-      script: null, broll: { clips: [] }, product: null, copy: null, musicOn: TRACKS[b.music] ? b.music !== 'none' : true, render: null, renderVariants: {}, export: null, consent: null, stub: true };
+      script: null, broll: { clips: [] }, product: null, overlays: { ...A.DEFAULT_OVERLAYS }, copy: null, musicOn: TRACKS[b.music] ? b.music !== 'none' : true, render: null, renderVariants: {}, export: null, consent: null, stub: true };
     L.last_used_avatar_id = a.id; await saveLib(L);
     await save(p); s.json(await view(p)); }));
   app.get('/api/twin/projects/:id', w(async (q, s) => s.json(await view(await load(q.params.id)))));
+  // optional burned-in overlays (salon name, "AI-generated" stamp): per project, off by default, applied on the next (re-)render
+  app.post('/api/twin/projects/:id/overlays', w(async (q, s) => { const p = await load(q.params.id), b = q.body || {};
+    for (const k of ['brand', 'ai_label']) if (b[k] != null && typeof b[k] !== 'boolean') throw err(400, `${k} must be true or false`);
+    const next = A.cleanOverlays(b, A.cleanOverlays(p.overlays));
+    if (p.render && JSON.stringify(next) !== JSON.stringify(A.cleanOverlays(p.overlays))) { p.renderVariants = {}; p.render.overlays_stale = true; }
+    p.overlays = next; await save(p); s.json(await view(p)); }));
   app.patch('/api/twin/projects/:id', w(async (q, s) => { // brief edits before approval (prompt/template/mood/music)
     const p = await load(q.params.id), b = q.body || {};
     if (b.prompt != null) { const chk = A.checkText(b.prompt, 'prompt'); if (!chk.ok) throw new A.BlockedError(chk); p.inputs.prompt = String(b.prompt).slice(0, 600); }
@@ -117,26 +123,27 @@ function mount({ app, llm, parseJSON, run, cfg, TRACKS, D, id, wrap, slug = A.SA
     if (b.prompt != null || b.template) { if (p.script) p.script.approved = false; if (['approved', 'review', 'exported'].includes(p.status)) p.status = p.script ? 'awaiting_approval' : 'brief'; }
     await save(p); s.json(await view(p)); }));
 
-  // optional product photo (the salon's own real product); M1 composites it into the stub render
+  // optional product photo (the salon's own real product). Stored with B-roll metadata for M3 (Runway); it is NOT rendered
+  // onto avatar segments. A sidecar <key>.meta.json in the same storage (R2 or local) records the intended use.
   app.post('/api/twin/projects/:id/product-url', w(async (q, s) => { const p = await load(q.params.id), ct = String(q.body.contentType || '');
     if (!PRODUCT_TYPES[ct]) throw err(400, 'Product photo must be a JPEG, PNG or WebP image');
     const key = `projects/${p.id}/product/product_${Date.now()}.${PRODUCT_TYPES[ct]}`; s.json({ key, ...(await st.presignPut(key, ct)) }); }));
   app.post('/api/twin/projects/:id/product', w(async (q, s) => { const p = await load(q.params.id), key = String(q.body.key || ''), mime = String(q.body.mime || '');
     if (!key.startsWith(`projects/${p.id}/product/`) || !PRODUCT_TYPES[mime]) throw err(400, 'bad product key'); st.safeKey(key);
     if (!(await st.exists(key))) throw err(400, 'Upload the photo first');
-    p.product = { key, mime, slot_start_s: p.product?.slot_start_s ?? null, slot_end_s: p.product?.slot_end_s ?? null };
+    p.product = { key, mime, ...A.PRODUCT_META, uploaded_at: new Date().toISOString() };
+    await st.putJSON(`${key}.meta.json`, { project_id: p.id, template: p.template, salon: p.profile.salon, key, mime, ...A.PRODUCT_META, uploaded_at: p.product.uploaded_at });
     await save(p); s.json(await view(p)); }));
   app.delete('/api/twin/projects/:id/product', w(async (q, s) => { const p = await load(q.params.id); p.product = null; await save(p); s.json(await view(p)); }));
 
   // draft: script + captions + B-roll plan (+ product slot). LLM when configured, otherwise the deterministic mock.
   app.post('/api/twin/projects/:id/draft', job('draft', async p => { const chk = A.checkText(p.inputs.prompt, 'prompt'); if (!chk.ok) throw new A.BlockedError(chk); }, async p => {
-    const ctx = { template: p.template, prompt: p.inputs.prompt, mood: p.inputs.mood, language: p.inputs.language, salon: p.profile.salon, avatar: p.avatar, hasProduct: !!p.product };
+    const ctx = { template: p.template, prompt: p.inputs.prompt, mood: p.inputs.mood, language: p.inputs.language, salon: p.profile.salon, avatar: p.avatar, hasProduct: false }; // product photo is for M3 B-roll, not the avatar script
     let d;
     if (live()) { try { d = A.cleanDraft(parseJSON(await llm({ system: 'You write short-form salon video scripts. Reply with JSON only.', effort: 'low', text: A.draftPrompt(ctx) })), ctx);
       if (!d.script.text || !A.checkAll({ script: d.script.text, captions: d.script.captions, broll: d.broll.clips }).ok) d = null; } catch (e) { console.error('twin draft AI failed, using template draft:', e.message); d = null; } }
     if (!d) { d = A.mockDraft(ctx); d.mode = 'template'; } else d.mode = 'ai';
     p.script = { ...d.script, approved: false, approved_at: null, approved_by: null, mode: d.mode }; p.broll = d.broll; p.copy = d.copy; p.total_s = d.total_s;
-    if (p.product) Object.assign(p.product, d.product_slot || { slot_start_s: Math.round(d.total_s * 0.45), slot_end_s: Math.round(d.total_s * 0.45) + 3 });
     p.status = 'awaiting_approval'; await save(p);
   }));
   app.post('/api/twin/projects/:id/approve', w(async (q, s) => {
@@ -144,18 +151,16 @@ function mount({ app, llm, parseJSON, run, cfg, TRACKS, D, id, wrap, slug = A.SA
     const r = A.cleanApproval(q.body || {}, p);
     p.script = { ...p.script, text: r.text, captions: r.captions, approved: true, approved_at: new Date().toISOString(), approved_by: 'owner' };
     p.broll = { clips: r.broll }; p.total_s = r.total;
-    if (p.product && q.body.product) { const a = Math.max(0, Math.min(r.total - 2, +q.body.product.slot_start_s || 0)); p.product.slot_start_s = a; p.product.slot_end_s = Math.min(r.total, Math.max(a + 2, +q.body.product.slot_end_s || a + 3)); }
     p.status = 'approved'; await save(p); s.json(await view(p)); }));
 
   // ---------- M2 live render (HeyGen Sample avatar) - only when HEYGEN_API_KEY + HEYGEN_LIVE=1; spend additionally needs HEYGEN_ALLOW_SPEND=1 ----------
   const probeDuration = async f => { const o = await run('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', f]); return +String(o?.stdout ?? o).trim(); };
   async function renderLive(p, { musicOn = p.musicOn } = {}) {
     const dir = D('cache', p.id);
-    const r = await TR.renderHeygen(p, { hg: HG, run, probeDuration, master: MASTER.masterFile, dir, musicOn,
-      getProduct: async (k, d) => { const f = path.join(d, path.basename(k)); if (!fs.existsSync(f)) await st.getFile(k, f); return f; } });
+    const r = await TR.renderHeygen(p, { hg: HG, run, probeDuration, master: MASTER.masterFile, dir, musicOn });
     p.heygen = r.heygen;
     const key = `projects/${p.id}/renders/${path.basename(r.out)}`; await st.putFile(key, r.out, 'video/mp4'); fs.unlinkSync(r.out);
-    return { key, duration: r.duration, music: r.music, track: r.track, loudness: r.loudness, ai_label: r.ai_label, stub: false, heygen_video_id: r.heygen.video_id, at: new Date().toISOString() };
+    return { key, duration: r.duration, music: r.music, track: r.track, loudness: r.loudness, overlays: r.overlays, ai_label: r.ai_label, stub: false, heygen_video_id: r.heygen.video_id, at: new Date().toISOString() };
   }
   const renderAny = (p, o) => (HG.configured() && (p.avatar?.heygen_avatar_id || p.avatar?.sample)) ? renderLive(p, o) : renderStub(p, o);
 
@@ -163,17 +168,17 @@ function mount({ app, llm, parseJSON, run, cfg, TRACKS, D, id, wrap, slug = A.SA
   async function renderStub(p, { musicOn = p.musicOn } = {}) {
     const dir = D('cache', p.id); fs.mkdirSync(dir, { recursive: true });
     const total = +p.total_s || A.estimateDuration(p.script.text);
-    const timeline = A.stubTimeline({ total, avatarName: p.avatar.name + (p.avatar.sample ? ' (Sample)' : ''), broll: p.broll.clips, product: p.product?.key ? p.product : null });
+    const timeline = A.stubTimeline({ total, avatarName: p.avatar.name + (p.avatar.sample ? ' (Sample)' : ''), broll: p.broll.clips, product: null }); // product photo is never rendered on the avatar
     const assPath = path.join(dir, 'twin.ass');
-    fs.writeFileSync(assPath, A.buildTwinAss({ lines: p.script.captions, salon: p.profile.salon, duration: total, tone: p.inputs.mood === 'Luxe' ? 'luxe' : 'clean', slates: timeline.filter(x => x.text) }));
-    let productFile = null; if (p.product?.key) { productFile = path.join(dir, path.basename(p.product.key)); if (!fs.existsSync(productFile)) await st.getFile(p.product.key, productFile); }
+    fs.writeFileSync(assPath, A.buildTwinAss({ lines: p.script.captions, salon: p.profile.salon, duration: total, tone: p.inputs.mood === 'Luxe' ? 'luxe' : 'clean', slates: timeline.filter(x => x.text), overlays: A.cleanOverlays(p.overlays) }));
+    const productFile = null;
     const musicFile = A.musicFor(p.inputs.music, musicOn);
     const out = path.join(dir, `twin_${Date.now()}${musicFile ? '' : '_nomusic'}.mp4`);
     await HG.createVideo(); await Promise.all(p.broll.clips.map(b => RW.textToVideo({ prompt: b.prompt, duration: b.duration }))); // stubs, no network
     await run('ffmpeg', A.stubFfmpegArgs({ total, timeline, assPath, productFile, musicFile, out }));
     const loudness = musicFile ? await MASTER.masterFile(out).catch(e => ({ error: String(e.message).slice(0, 200) })) : { skipped: 'no music (silent bed)' };
     const key = `projects/${p.id}/renders/${path.basename(out)}`; await st.putFile(key, out, 'video/mp4'); fs.unlinkSync(out);
-    return { key, duration: total, music: !!musicFile, track: musicFile ? p.inputs.music : 'none', loudness, ai_label: A.AI_LABEL, stub: true, timeline, at: new Date().toISOString() };
+    return { key, duration: total, music: !!musicFile, track: musicFile ? p.inputs.music : 'none', loudness, overlays: A.cleanOverlays(p.overlays), ai_label: A.cleanOverlays(p.overlays).ai_label ? A.AI_LABEL : null, stub: true, timeline, at: new Date().toISOString() };
   }
   const needApproved = async p => { if (!p.script?.approved) throw err(400, 'Approve the script before rendering'); };
   app.post('/api/twin/projects/:id/render', job('render', needApproved, async p => {
@@ -199,8 +204,8 @@ function mount({ app, llm, parseJSON, run, cfg, TRACKS, D, id, wrap, slug = A.SA
     if (!p.renderVariants?.[vk]) { const r = await renderAny(p, { musicOn: music }); p.renderVariants = { ...(p.renderVariants || {}), [vk]: r.key }; }
     if (b.caption != null || b.hashtags) p.copy = { caption: String(b.caption ?? p.copy?.caption ?? '').slice(0, 2200), hashtags: Array.isArray(b.hashtags) ? b.hashtags.slice(0, 15) : p.copy?.hashtags || [] };
     p.consent = { text: TWIN_CONSENT, accepted: true, at: new Date().toISOString() };
-    p.export = { at: new Date().toISOString(), music, key: p.renderVariants[vk], ai_label: A.AI_LABEL, ig_ai_label_reminder: true }; p.status = 'exported'; await save(p);
-    s.json({ download: await st.presignGet(p.renderVariants[vk], `salonreel-twin-${p.id}${music ? '' : '-no-music'}.mp4`), music, caption: p.copy?.caption, hashtags: p.copy?.hashtags, igAiLabelReminder: IG_AI_REMINDER, aiLabel: A.AI_LABEL });
+    p.export = { at: new Date().toISOString(), music, key: p.renderVariants[vk], overlays: A.cleanOverlays(p.overlays), ai_label: A.cleanOverlays(p.overlays).ai_label ? A.AI_LABEL : null, ig_ai_label_reminder: true }; p.status = 'exported'; await save(p);
+    s.json({ download: await st.presignGet(p.renderVariants[vk], `salonreel-twin-${p.id}${music ? '' : '-no-music'}.mp4`), music, caption: p.copy?.caption, hashtags: p.copy?.hashtags, igAiLabelReminder: IG_AI_REMINDER, aiLabel: A.AI_LABEL, overlays: A.cleanOverlays(p.overlays) });
   }));
   app.use('/api/twin', (q, s) => s.status(404).json({ error: 'Not found' }));
 }

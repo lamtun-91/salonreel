@@ -1,7 +1,8 @@
 'use strict';
 // M2: real Twin render from a HeyGen Sample (stock) avatar. Dependencies are injected so tests run with the network mocked.
 // Flow: create HeyGen avatar video (9:16) -> poll -> download raw -> retime captions to the real spoken length ->
-// assemble in avatar.js (crop 1080x1920, captions, brand, AI-generated label, product photo, music bed) -> master.
+// assemble in avatar.js (crop 1080x1920, captions, brand pill, AI-generated label, music bed) -> master.
+// The product photo is never composited here (stored for M3 B-roll).
 // A stored raw clip is reused on re-render / export variants so captions or music edits never pay for a second HeyGen render.
 const fs = require('fs'), path = require('path');
 const A = require('./avatar');
@@ -19,7 +20,7 @@ function heygenIds(p, hg, env = process.env) {
   return { avatar_id, voice_id };
 }
 
-async function renderHeygen(p, { hg, run, probeDuration, master, dir, getProduct, musicOn = p.musicOn, env = process.env, hgOpts = {}, log = () => {} }) {
+async function renderHeygen(p, { hg, run, probeDuration, master, dir, musicOn = p.musicOn, env = process.env, hgOpts = {}, log = () => {} }) {
   fs.mkdirSync(dir, { recursive: true });
   const raw = path.join(dir, 'heygen_raw.mp4');
   let hgInfo = p.heygen && p.heygen.video_id && fs.existsSync(raw) ? p.heygen : null;
@@ -35,16 +36,13 @@ async function renderHeygen(p, { hg, run, probeDuration, master, dir, getProduct
   const total = A.twinTotal(clip);
   const planned = +p.total_s || A.estimateDuration(p.script.text);
   const captions = retimeCaptions(p.script.captions, planned, total);
-  let product = null;
-  if (p.product?.key) { const k = total / planned; product = { slot_start_s: Math.round(p.product.slot_start_s * k * 100) / 100, slot_end_s: Math.round(Math.min(total, p.product.slot_end_s * k) * 100) / 100 }; }
   const assPath = path.join(dir, 'twin_live.ass');
-  fs.writeFileSync(assPath, A.buildTwinAss({ lines: captions, salon: p.profile.salon, duration: total, tone: p.inputs?.mood === 'Luxe' ? 'luxe' : 'clean', solidCaptions: true }));
-  const productFile = product ? await getProduct(p.product.key, dir) : null;
+  fs.writeFileSync(assPath, A.buildTwinAss({ lines: captions, salon: p.profile.salon, duration: total, tone: p.inputs?.mood === 'Luxe' ? 'luxe' : 'clean', solidCaptions: true, overlays: A.cleanOverlays(p.overlays) }));
   const musicFile = A.musicFor(p.inputs?.music, musicOn);
   const out = path.join(dir, `twin_live_${Date.now()}${musicFile ? '' : '_nomusic'}.mp4`);
-  await run('ffmpeg', A.twinAssembleArgs({ talking: raw, total, assPath, productFile, product, musicFile, out }));
+  await run('ffmpeg', A.twinAssembleArgs({ talking: raw, total, assPath, musicFile, out }));
   // speech is always present, so master both variants
   const loudness = await master(out).catch(e => ({ error: String(e.message).slice(0, 200) }));
-  return { out, raw, heygen: hgInfo, duration: total, captions, product, music: !!musicFile, track: musicFile ? p.inputs.music : 'none', loudness, ai_label: A.AI_LABEL };
+  return { out, raw, heygen: hgInfo, duration: total, captions, product_for_broll: p.product?.key || null, music: !!musicFile, track: musicFile ? p.inputs.music : 'none', loudness, overlays: A.cleanOverlays(p.overlays), ai_label: A.cleanOverlays(p.overlays).ai_label ? A.AI_LABEL : null };
 }
 module.exports = { retimeCaptions, heygenIds, renderHeygen };

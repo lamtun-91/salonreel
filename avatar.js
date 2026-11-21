@@ -142,24 +142,47 @@ function cleanApproval(body, p) {
 }
 
 // ---------- stub assembly ----------
-// AI label sits top-left below the brand band (brand: centered, top at y=285 ~ 330; captions: bottom box ending y=1230). Always on.
-const AI_LABEL_ZONE = { x: 70, topY: 372, size: 34 };
-// Twin-only brand zone: a bottom band (centre, bottom edge at y=1720) so the salon name never lands on the presenter's face.
-// Layout top->bottom: AI label (372-420) | captions (box bottom 1230) | product card (1262-1586) | brand (1668-1720).
-// Hair Reveal keeps pipeline.js BRAND_ZONE (top band) untouched; only the Twin ASS swaps the Brand style.
-const TWIN_BRAND_ZONE = { bottomY: 1720, size: 46 };
+// Twin layout (1080x1920), top -> bottom. Hair Reveal keeps pipeline.js BRAND_ZONE / CAPTION_ZONE untouched; only the
+// Twin ASS restyles the brand and adds the label.
+// Both burned-in overlays are per-project toggles, OFF by default (Tung, 2026-11-20); the IG "AI info" reminder at export stays.
+//   AI label   (overlays.ai_label): top-left, text 222-256 (box with 8px border ~214-264) - below IG's top UI (~0-200), above the hair
+//   captions   : pipeline CAPTION_ZONE, box bottom at y=1230 (always on)
+//   brand pill (overlays.brand)   : centred, dark translucent rounded pill 1654-1732 behind the salon name (text ~1670-1716), never on the face
+// No product card on avatar segments: the salon's product photo is stored for M3 B-roll only.
+const AI_LABEL_ZONE = { x: 70, topY: 222, size: 34 };
+const TWIN_BRAND_ZONE = { bottomY: 1716, size: 46 };
+const BRAND_PILL = { h: 78, padX: 34, radius: 39, alpha: '80', charW: 0.62, spacing: 4, maxW: 960 }; // alpha 80 hex = ~50% opaque black
+function brandPill(salon) {
+  const n = [...String(salon || '')].length;
+  const w = Math.min(BRAND_PILL.maxW, Math.round(n * (TWIN_BRAND_ZONE.size * BRAND_PILL.charW + BRAND_PILL.spacing) + 2 * BRAND_PILL.padX));
+  const h = BRAND_PILL.h, r = Math.min(BRAND_PILL.radius, h / 2), cy = TWIN_BRAND_ZONE.bottomY - TWIN_BRAND_ZONE.size / 2, x0 = Math.round(540 - w / 2), y0 = Math.round(cy - h / 2);
+  return { x: x0, y: y0, w, h, r, bottom: y0 + h };
+}
+// ASS vector drawing of a rounded rectangle (bezier corners), absolute coords via \pos(0,0)
+function pillPath({ x, y, w, h, r }) {
+  const k = r * 0.5523, X = x + w, Y = y + h, f = v => Math.round(v);
+  return `m ${f(x + r)} ${y} l ${f(X - r)} ${y} b ${f(X - r + k)} ${y} ${X} ${f(y + r - k)} ${X} ${f(y + r)} l ${X} ${f(Y - r)} b ${X} ${f(Y - r + k)} ${f(X - r + k)} ${Y} ${f(X - r)} ${Y} `
+    + `l ${f(x + r)} ${Y} b ${f(x + r - k)} ${Y} ${x} ${f(Y - r + k)} ${x} ${f(Y - r)} l ${x} ${f(y + r)} b ${x} ${f(y + r - k)} ${f(x + r - k)} ${y} ${f(x + r)} ${y}`;
+}
 function assTime(t) { const h = Math.floor(t / 3600), m = Math.floor(t / 60) % 60, s = (t % 60).toFixed(2).padStart(5, '0'); return `${h}:${String(m).padStart(2, '0')}:${s}`; }
 const assEsc = s => String(s).replace(/[{}\\]/g, '').replace(/\n/g, '\\N');
 // wraps pipeline.buildAss (unchanged) with an always-on AI label and optional stub slate text
-function buildTwinAss({ lines, salon, duration, tone, slates = [], solidCaptions = false }) {
+const DEFAULT_OVERLAYS = Object.freeze({ brand: false, ai_label: false });
+const cleanOverlays = (o = {}, prev = DEFAULT_OVERLAYS) => ({ brand: typeof o.brand === 'boolean' ? o.brand : !!prev.brand, ai_label: typeof o.ai_label === 'boolean' ? o.ai_label : !!prev.ai_label });
+function buildTwinAss({ lines, salon, duration, tone, slates = [], solidCaptions = false, overlays = DEFAULT_OVERLAYS }) {
+  const ov = cleanOverlays(overlays);
   let a = P.buildAss({ lines, salon, duration, tone });
-  a = a.replace(/\nStyle: Brand,[^\n]*/, `\nStyle: Brand,DejaVu Sans,${TWIN_BRAND_ZONE.size},&H00FFFFFF,&H00FFFFFF,&H00000000,&H78000000,1,0,0,0,100,100,4,0,1,3,3,2,90,90,${1920 - TWIN_BRAND_ZONE.bottomY},1`);
+  // Twin brand: bottom band, soft shadow only (the pill gives contrast on white clothing)
+  a = a.replace(/\nStyle: Brand,[^\n]*/, `\nStyle: Brand,DejaVu Sans,${TWIN_BRAND_ZONE.size},&H00FFFFFF,&H00FFFFFF,&H00000000,&HA0000000,1,0,0,0,100,100,4,0,1,0,1,2,90,90,${1920 - TWIN_BRAND_ZONE.bottomY},1`);
   // live avatar footage is often a bright studio backdrop: make the caption box near-opaque so white text stays legible
   if (solidCaptions) a = a.replace(/(\nStyle: Cap,[^\n]*?)&H50000000,&H50000000/, '$1&H20000000,&H20000000');
   const styles = `Style: AILabel,DejaVu Sans,${AI_LABEL_ZONE.size},&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,1,0,0,0,100,100,1,0,3,8,0,7,${AI_LABEL_ZONE.x},60,${AI_LABEL_ZONE.topY},1
-Style: Slate,DejaVu Sans,44,&H00F3E3E7,&H00F3E3E7,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,5,120,120,0,1`;
+Style: Slate,DejaVu Sans,44,&H00F3E3E7,&H00F3E3E7,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,5,120,120,0,1
+Style: Pill,DejaVu Sans,20,&H${BRAND_PILL.alpha}000000,&H${BRAND_PILL.alpha}000000,&HFF000000,&HFF000000,0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1`;
   a = a.replace(/(\nStyle: Brand[^\n]*)/, `$1\n${styles}`);
-  a += `\nDialogue: 2,${assTime(0)},${assTime(duration)},AILabel,,0,0,0,,${AI_LABEL}`;
+  if (ov.ai_label) a += `\nDialogue: 2,${assTime(0)},${assTime(duration)},AILabel,,0,0,0,,${AI_LABEL}`;
+  if (!ov.brand) a = a.replace(/\nDialogue: 0,[^,]+,[^,]+,Brand,[^\n]*/, '');
+  else if (salon) a = a.replace(/\nDialogue: 0,([^,]+),([^,]+),Brand,/, (m0, st, en) => `\nDialogue: 0,${st},${en},Pill,,0,0,0,,{\\an7\\pos(0,0)\\bord0\\shad0\\p1}${pillPath(brandPill(salon))}{\\p0}${m0.replace(/^\nDialogue: 0,/, '\nDialogue: 1,')}`);
   for (const s of slates) a += `\nDialogue: 0,${assTime(s.start_s)},${assTime(s.end_s)},Slate,,0,0,0,,${assEsc(s.text)}`;
   return a + '\n';
 }
@@ -192,20 +215,18 @@ function stubFfmpegArgs({ total, timeline, assPath, productFile, musicFile, musi
 }
 const musicFor = (track, musicOn) => (musicOn === false || !track || track === 'none') ? null : MUSIC.fileFor(track);
 
-// M2: assemble a HeyGen talking-head (any aspect) into the 1080x1920 reel: cover-crop to 9:16, optional real product
-// photo on a white card in its window, ASS (brand + captions + always-on AI label), HeyGen speech kept with the music
-// bed ducked underneath (or speech only when music is off).
+// M2: assemble a HeyGen talking-head (any aspect) into the 1080x1920 reel: cover-crop to 9:16, ASS (brand pill + captions +
+// always-on AI label), HeyGen speech kept with the music bed ducked underneath (or speech only when music is off).
+// No product photo is composited onto avatar segments (Tung, 2026-11-20); the photo is kept for M3 B-roll.
 const MUSIC_UNDER_SPEECH_DB = -20;
-// product card sits below the caption box (P.CAPTION_ZONE bottom 1230) so it never covers the presenter's face
-const PRODUCT_CARD = { w: 360, h: 300, y: 1262, pad: 12 }; // outer box 1262..1586 (h + 2*pad), above the Twin brand band
-function twinAssembleArgs({ talking, total, assPath, productFile, product, musicFile, musicStart = 0, out, fontsdir = '/usr/share/fonts/truetype/dejavu', ffEsc = s => s.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'") }) {
+// metadata stored with the salon's product photo: kept for future B-roll (M3, Runway), never rendered on the avatar
+const PRODUCT_META = Object.freeze({ use: 'broll', milestone: 'M3', provider: 'runway', render_in_avatar: false, status: 'stored_for_broll' });
+function twinAssembleArgs({ talking, total, assPath, musicFile, musicStart = 0, out, fontsdir = '/usr/share/fonts/truetype/dejavu', ffEsc = s => s.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'") }) {
   if (!talking) throw new Error('talking-head file is required');
   const T = (+total).toFixed(3);
   const args = ['-y', '-i', talking];
   let vi = 1;
   let fc = '[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30[bg]'; let last = '[bg]';
-  if (productFile && product) { args.push('-loop', '1', '-t', T, '-i', productFile);
-    fc += `;[${vi}:v]scale=${PRODUCT_CARD.w}:${PRODUCT_CARD.h}:force_original_aspect_ratio=decrease,pad=iw+24:ih+24:12:12:color=white,format=rgba[pr];${last}[pr]overlay=(W-w)/2:${PRODUCT_CARD.y}:enable='between(t,${product.slot_start_s},${product.slot_end_s})'[bp]`; last = '[bp]'; vi++; }
   fc += `;${last}subtitles='${ffEsc(assPath)}':fontsdir=${fontsdir},format=yuv420p[vout]`;
   fc += `;[0:a]aformat=sample_rates=44100:channel_layouts=stereo,apad,atrim=0:${T}[sp]`;
   if (musicFile) { args.push('-ss', String(musicStart), '-i', musicFile);
@@ -220,4 +241,4 @@ const twinTotal = (clipDuration, cap = DURATION.max) => r2(Math.max(1, Math.min(
 
 module.exports = { PATH, SALON_SLUG, DEFAULT_SALON, AI_LABEL, AI_LABEL_ZONE, DURATION, TEMPLATES, ROLES, BLOCK, checkText, checkAll, BlockedError,
   cardStatus, selectable, stubSeed, cardView, preselect, newAvatar, advanceStub, draftPrompt, cleanDraft, mockDraft, cleanApproval, estimateDuration,
-  buildTwinAss, stubTimeline, stubFfmpegArgs, musicFor, COLORS, twinAssembleArgs, twinTotal, MUSIC_UNDER_SPEECH_DB, PRODUCT_CARD, TWIN_BRAND_ZONE };
+  buildTwinAss, stubTimeline, stubFfmpegArgs, musicFor, COLORS, twinAssembleArgs, twinTotal, MUSIC_UNDER_SPEECH_DB, DEFAULT_OVERLAYS, cleanOverlays, TWIN_BRAND_ZONE, BRAND_PILL, brandPill, pillPath, PRODUCT_META };

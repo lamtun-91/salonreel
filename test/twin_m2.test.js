@@ -95,18 +95,16 @@ test('m2: retimeCaptions scales to the real clip length', () => {
   assert.deepEqual(c.map(x => [x.start_s, x.end_s]), [[0, 5], [5, 10], [15, 18]]);
 });
 
-test('m2: twinAssembleArgs crops to 1080x1920, keeps speech, ducks music, overlays the product', () => {
+test('m2: twinAssembleArgs crops to 1080x1920, keeps speech, ducks music, never overlays a product photo', () => {
   const a = A.twinAssembleArgs({ talking: 'raw.mp4', total: 20, assPath: '/tmp/x.ass', productFile: 'p.png', product: { slot_start_s: 5, slot_end_s: 9 }, musicFile: 'm.mp3', out: 'o.mp4' });
   const fc = a[a.indexOf('-filter_complex') + 1];
-  assert.match(fc, /crop=1080:1920/); assert.match(fc, /subtitles=/); assert.match(fc, /between\(t,5,9\)/);
+  assert.match(fc, /crop=1080:1920/); assert.match(fc, /subtitles=/);
   assert.match(fc, new RegExp(`volume=${A.MUSIC_UNDER_SPEECH_DB}dB`)); assert.match(fc, /amix=inputs=2:duration=first/);
+  assert.doesNotMatch(fc, /overlay|between\(t,5,9\)/); assert.ok(!a.includes('p.png'), 'product photo is not an input');
   const b = A.twinAssembleArgs({ talking: 'raw.mp4', total: 20, assPath: '/tmp/x.ass', out: 'o.mp4' });
   assert.doesNotMatch(b[b.indexOf('-filter_complex') + 1], /amix|overlay/);
-  assert.match(fc, new RegExp(`overlay=\\(W-w\\)/2:${A.PRODUCT_CARD.y}`)); assert.ok(A.PRODUCT_CARD.y > 1230, 'product card must sit below the caption zone');
-  assert.match(A.buildTwinAss({ lines: [{ start_s: 0, end_s: 1, text: 'x' }], salon: 'Olya Atelier', duration: 2, solidCaptions: true }), /Style: Cap,[^\n]*&H20000000,&H20000000/);
   assert.equal(A.twinTotal(52), A.DURATION.max); assert.equal(A.twinTotal(21.37), 21.37);
 });
-
 test('m2: renderHeygen end-to-end with a mocked HeyGen (real ffmpeg), raw clip reused on re-render', { timeout: 120000 }, async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'twin_m2_'));
   const src = path.join(dir, 'fake_heygen.mp4');
@@ -128,9 +126,15 @@ test('m2: renderHeygen end-to-end with a mocked HeyGen (real ffmpeg), raw clip r
   assert.ok(pr.streams.some(s => s.codec_type === 'audio'));
   assert.ok(Math.abs(+pr.format.duration - 4) < 0.15, pr.format.duration);
   assert.deepEqual(r.captions.map(c => c.end_s), [4]);
-  assert.match(fs.readFileSync(path.join(dir, 'twin_live.ass'), 'utf8'), /AILabel,,0,0,0,,AI-generated/);
-  p.heygen = r.heygen; await TR.renderHeygen(p, opts);
+  const ass0 = fs.readFileSync(path.join(dir, 'twin_live.ass'), 'utf8');
+  assert.doesNotMatch(ass0, /AILabel,,0,0,0,,AI-generated/, 'AI stamp off by default'); assert.doesNotMatch(ass0, /Brand,,0,0,0,,Olya Atelier/, 'salon name off by default');
+  assert.equal(r.ai_label, null); assert.deepEqual(r.overlays, { brand: false, ai_label: false });
+  p.heygen = r.heygen; p.overlays = { brand: true, ai_label: true }; p.product = { key: 'projects/abc123abc123/product/x.png', render_in_avatar: false };
+  const r2 = await TR.renderHeygen(p, opts);
   assert.equal(calls.create, 1, 're-render must reuse the stored HeyGen clip');
+  const ass1 = fs.readFileSync(path.join(dir, 'twin_live.ass'), 'utf8');
+  assert.match(ass1, /AILabel,,0,0,0,,AI-generated/); assert.match(ass1, /Brand,,0,0,0,,Olya Atelier/); assert.match(ass1, /,Pill,,/);
+  assert.equal(r2.ai_label, 'AI-generated'); assert.equal(r2.product_for_broll, p.product.key);
   assert.throws(() => TR.heygenIds({ avatar: { sample: false } }, hg, {}), /no HeyGen look/);
   fs.rmSync(dir, { recursive: true, force: true });
 });
@@ -195,18 +199,22 @@ test('m2 calib: one ~3 w/s calibration drives the script target, duration estima
   // mock drafts now land near 18s
   for (const t of ['tip', 'faq', 'promo', 'booking']) { const d = A.mockDraft({ template: t, salon: 'Olya Atelier', avatar: { name: 'Olya' } }); assert.ok(d.total_s >= 15 && d.total_s <= 24, `${t} ${d.total_s}`); }
 });
-test('m2 brand: Twin brand sits in a bottom band clear of captions, AI label and product card', () => {
-  const a = A.buildTwinAss({ lines: [{ start_s: 0, end_s: 1, text: 'x' }], salon: 'Olya Atelier', duration: 2 });
+test('m2 layout: optional brand pill (bottom band) and AI stamp (top safe area) clear captions and each other', () => {
+  const a = A.buildTwinAss({ lines: [{ start_s: 0, end_s: 1, text: 'x' }], salon: 'Olya Atelier', duration: 2, overlays: { brand: true, ai_label: true } });
   const brand = a.split('\n').find(l => l.startsWith('Style: Brand,')).split(',');
   assert.equal(brand[18], '2', 'bottom-centre alignment'); assert.equal(+brand[21], 1920 - A.TWIN_BRAND_ZONE.bottomY);
-  const brandTop = A.TWIN_BRAND_ZONE.bottomY - A.TWIN_BRAND_ZONE.size - 6;
-  const cardBottom = A.PRODUCT_CARD.y + A.PRODUCT_CARD.h + 2 * A.PRODUCT_CARD.pad;
+  const pill = A.brandPill('Olya Atelier');
+  assert.ok(pill.y > P.CAPTION_ZONE.bottomY + 100, 'pill below captions'); assert.ok(pill.bottom <= 1760, 'pill above the bottom edge');
+  assert.ok(pill.x > 0 && pill.x + pill.w < 1080); assert.equal(pill.x + pill.w / 2, 540);
+  assert.ok(pill.y < A.TWIN_BRAND_ZONE.bottomY - A.TWIN_BRAND_ZONE.size && pill.bottom > A.TWIN_BRAND_ZONE.bottomY, 'pill wraps the text');
+  assert.match(a, new RegExp(`Style: Pill,[^\\n]*&H${A.BRAND_PILL.alpha}000000`)); assert.ok(parseInt(A.BRAND_PILL.alpha, 16) >= 0x73 && parseInt(A.BRAND_PILL.alpha, 16) <= 0x8C, '45-55% opaque');
+  assert.ok(A.brandPill('A very long salon name for the pill test').w <= A.BRAND_PILL.maxW);
+  const label = a.split('\n').find(l => l.startsWith('Style: AILabel,')).split(',');
+  assert.equal(label[18], '7'); assert.equal(+label[21], A.AI_LABEL_ZONE.topY);
+  assert.ok(A.AI_LABEL_ZONE.topY >= 210 && A.AI_LABEL_ZONE.topY + A.AI_LABEL_ZONE.size <= 270, 'label in the top safe area ~220-260');
   assert.ok(A.AI_LABEL_ZONE.topY + A.AI_LABEL_ZONE.size < P.CAPTION_ZONE.bottomY - 3 * P.CAPTION_ZONE.size);
-  assert.ok(P.CAPTION_ZONE.bottomY < A.PRODUCT_CARD.y, 'captions above card');
-  assert.ok(cardBottom < brandTop, `card ${cardBottom} vs brand ${brandTop}`);
-  assert.ok(A.TWIN_BRAND_ZONE.bottomY <= 1760, 'brand stays above the very bottom edge');
-  const args = A.twinAssembleArgs({ talking: 'r.mp4', total: 10, assPath: '/tmp/a.ass', productFile: 'p.png', product: { slot_start_s: 1, slot_end_s: 3 }, out: 'o.mp4' });
-  assert.match(args[args.indexOf('-filter_complex') + 1], new RegExp(`scale=${A.PRODUCT_CARD.w}:${A.PRODUCT_CARD.h}:.*pad=iw\\+24:ih\\+24:12:12`));
+  assert.deepEqual(A.cleanOverlays({}), { brand: false, ai_label: false }); assert.deepEqual(A.cleanOverlays({ brand: 'x' }), { brand: false, ai_label: false });
+  assert.equal(A.PRODUCT_META.render_in_avatar, false);
 });
 test('m2 brand: Hair Reveal brand/caption overlay params are unchanged', () => {
   const h = s => require('crypto').createHash('sha256').update(s).digest('hex');

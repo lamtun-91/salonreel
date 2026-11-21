@@ -27,7 +27,7 @@ label{display:block;font-size:13px;font-weight:600;margin:14px 0 6px}input,selec
 .phone{width:270px;aspect-ratio:9/16;border-radius:36px;border:8px solid #1d1719;position:relative;overflow:hidden;margin:auto;background:#000}.phone video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
 .grid{display:grid;grid-template-columns:300px 1fr;gap:24px}@media(max-width:720px){.grid{grid-template-columns:1fr}}
 .consent{display:flex;gap:10px;align-items:flex-start;font-weight:500;font-size:13px}.consent input{width:auto;margin-top:2px}
-.note{font-size:12px;color:var(--mut);background:#fdf6e9;border-radius:10px;padding:8px 12px;margin-top:12px}.iga{font-size:13px;background:#e7e3f6;color:#2f2760;border-radius:12px;padding:10px 14px;margin-top:12px}
+.note{font-size:12px;color:var(--mut);background:#fdf6e9;border-radius:10px;padding:8px 12px;margin-top:12px}.iga{font-size:13px;background:#e7e3f6;color:#2f2760;border-radius:12px;padding:10px 14px;margin-top:12px}.igcall{background:#fff4d6;border:2px solid #e0a100;color:#4a3500;border-radius:14px;padding:12px 14px;margin-top:14px;font-size:14px}.igcall b{display:block;font-size:15px;margin-bottom:4px}
 .err{color:#b3261e;font-size:13px;margin-top:10px;white-space:pre-wrap}.bar{height:8px;background:#f3e3e7;border-radius:8px;overflow:hidden;margin:18px 0}.bar div{height:100%;width:0;background:var(--rose);transition:width .6s}
 .banner{background:#efeaf9;color:#3f3577;text-align:center;font-size:13px;padding:8px}
 .modal{position:fixed;inset:0;background:#2b212599;display:none;align-items:center;justify-content:center;padding:20px;z-index:8}.modal.on{display:flex}.modal>div{background:#fff;border-radius:20px;padding:26px;max-width:400px;width:100%}
@@ -52,7 +52,7 @@ footer{text-align:center;font-size:11px;color:var(--mut);padding:10px 0 30px}foo
 <p class="note">AI twin reels are for talking-to-camera content. To show a client's hair result, use Hair Reveal with real footage.</p>
 <div class="err" id="e1"></div><div class="row" style="margin-top:18px"><button class="btn ghost" onclick="go(0)">← Avatar</button><button class="btn rose" id="briefBtn">Next: product photo →</button></div></section>
 
-<section id="t2"><h2>Add a product photo <span class="pill warn">optional</span></h2><p class="s">Show one of your real retail products for a few seconds. JPEG, PNG or WebP.</p>
+<section id="t2"><h2>Add a product photo <span class="pill warn">optional</span></h2><p class="s">Upload a photo of one of your real retail products (JPEG, PNG or WebP). We save it for upcoming product B-roll scenes; it is not shown over your avatar.</p>
 <div class="drop" id="drop"><div id="prodPrev"></div><input type="file" id="prodFile" accept="image/jpeg,image/png,image/webp" style="width:auto"><div class="s" id="prodStat" style="margin:8px 0 0"></div></div>
 <div class="err" id="e2"></div><div class="row" style="margin-top:18px"><button class="btn ghost" onclick="go(1)">← Brief</button><button class="btn ghost" id="skipBtn">Skip</button><button class="btn rose" id="draftBtn">Write my script →</button></div></section>
 
@@ -68,9 +68,12 @@ footer{text-align:center;font-size:11px;color:var(--mut);padding:10px 0 30px}foo
 <section id="t5"><h2>Review &amp; export <span class="pill aib">AI-generated</span></h2><div class="grid"><div><div class="phone"><video id="prevV" controls playsinline controlsList="nodownload"></video></div><p class="s" id="renSum" style="text-align:center;margin-top:8px"></p></div>
 <div><label>On-screen captions</label><div id="caps2"></div><button class="btn ghost sm" id="rerBtn" style="margin-top:6px">↻ Re-render with edits</button><span class="s" id="rerStat"></span>
 <label>Caption</label><textarea id="caption" rows="5"></textarea><label>Hashtags</label><textarea id="tags" rows="2"></textarea>
+<label>On the video <span class="s">(optional, off by default)</span></label>
+<label class="consent"><input type="checkbox" id="ovBrand"><span>Show the salon name on the video</span></label>
+<label class="consent"><input type="checkbox" id="ovLabel"><span>Show an &ldquo;AI-generated&rdquo; stamp on the video</span></label><span class="s" id="ovStat"></span>
 <label class="consent"><input type="checkbox" id="noMusic"><span>Export without background music</span></label>
 <label class="consent"><input type="checkbox" id="consent"><span id="consentTxt"></span></label>
-<div class="iga" id="igaTxt"></div>
+<div class="igcall" id="igCall" role="note"><b>⚠️ Before you post: turn on Instagram&rsquo;s &ldquo;AI info&rdquo; label</b><span id="igaTxt"></span></div>
 <div class="row" style="margin-top:14px"><button class="btn rose" id="expBtn" disabled>⬇ Export MP4</button><button class="btn ghost" id="copyBtn">Copy caption &amp; hashtags</button></div><div id="dl" style="margin-top:10px"></div>
 <div class="err" id="e5"></div><div class="note">📱 Post it yourself: Instagram → + → Reel → pick the video → Advanced settings → turn on the AI label.</div></div></div></section>
 </main>

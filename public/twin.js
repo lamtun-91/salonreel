@@ -62,7 +62,7 @@ function drawProd() { $('prodPrev').innerHTML = P?.productUrl ? `<img src="${esc
   if ($('prodRm')) $('prodRm').onclick = async () => { P = await api(`/api/twin/projects/${P.id}/product`, undefined, 'DELETE'); drawProd(); }; }
 $('prodFile').onchange = async e => { const f = e.target.files[0]; if (!f) return; $('e2').textContent = ''; $('prodStat').textContent = 'Uploading…';
   try { const u = await api(`/api/twin/projects/${P.id}/product-url`, { contentType: f.type }); const r = await fetch(u.url, { method: 'PUT', headers: u.headers, body: f }); if (!r.ok) throw new Error('Upload failed');
-    P = await api(`/api/twin/projects/${P.id}/product`, { key: u.key, mime: f.type }); $('prodStat').textContent = 'Added. It will appear for a few seconds in your Reel.'; drawProd(); }
+    P = await api(`/api/twin/projects/${P.id}/product`, { key: u.key, mime: f.type }); $('prodStat').textContent = 'Saved for upcoming product B-roll scenes. It won\'t appear over your avatar.'; drawProd(); }
   catch (x) { $('e2').textContent = x.message; $('prodStat').textContent = ''; } };
 async function draft(errEl) { errEl.textContent = ''; $('draftBtn').disabled = $('redraftBtn').disabled = true; $('draftStat').textContent = 'Writing your script…';
   try { P = await api(`/api/twin/projects/${P.id}/draft`, {}); go(3); } catch (x) { errEl.textContent = x.message; } finally { $('draftBtn').disabled = $('redraftBtn').disabled = false; } }
@@ -76,7 +76,7 @@ function drawDraft() { if (!P?.script) return; $('script').value = P.script.text
   $('draftStat').textContent = (P.script.approved ? 'Approved. ' : 'Nothing is rendered until you approve. ') + (P.script.mode == 'template' ? 'Draft written from the template.' : '');
   $('caps').innerHTML = P.script.captions.map((c, i) => capRow(c, i, 'c')).join('');
   $('broll').innerHTML = P.broll.clips.map((b, i) => `<div class="broll"><b>${b.start_s}s – ${b.end_s}s</b> · salon atmosphere, no faces or hair results<textarea data-i="${i}" rows="2">${esc(b.prompt)}</textarea></div>`).join('') || '<p class="s">No B-roll.</p>';
-  $('prodSlot').innerHTML = P.product ? `<div class="broll"><b>Product photo</b> shown ${P.product.slot_start_s}s – ${P.product.slot_end_s}s (your real photo, not AI)</div>` : '';
+  $('prodSlot').innerHTML = P.product ? `<div class="broll"><b>Product photo</b> saved for upcoming product B-roll (your real photo, not AI). Not shown in this Reel.</div>` : '';
   $('approve').checked = false; $('approveBtn').disabled = true; }
 $('approve').onchange = () => $('approveBtn').disabled = !$('approve').checked;
 $('approveBtn').onclick = async () => { $('e3').textContent = '';
@@ -91,13 +91,19 @@ function drawReview() { if (!P?.render) return; $('prevV').src = P.previewUrl;
   $('renSum').textContent = `${Math.round(P.render.duration)}s · ${P.avatar.name}${P.avatar.sample ? ' (Sample)' : ''} · ${P.render.music ? 'with music' : 'no music'}${P.render.stub ? ' · preview render' : ''}`;
   $('caps2').innerHTML = P.script.captions.map((c, i) => capRow(c, i, 'r')).join('');
   $('caption').value = P.copy?.caption || ''; $('tags').value = (P.copy?.hashtags || []).join(' ');
+  $('ovBrand').checked = !!P.overlays?.brand; $('ovLabel').checked = !!P.overlays?.ai_label;
   $('noMusic').checked = !P.render.music; $('noMusic').disabled = !P.render.music; $('consent').checked = false; $('expBtn').disabled = true; $('dl').innerHTML = ''; }
 $('consent').onchange = () => $('expBtn').disabled = !$('consent').checked;
+// overlay toggles: saved on the project, then the preview is re-rendered with them
+async function setOverlays() { $('ovStat').textContent = ' Saving…';
+  try { P = await api(`/api/twin/projects/${P.id}/overlays`, { brand: $('ovBrand').checked, ai_label: $('ovLabel').checked }); $('ovStat').textContent = '';
+    await render('rerender', { captions: readCaps($('caps2'), P.script.captions) }); } catch (x) { $('e5').textContent = x.message; $('ovStat').textContent = ''; } }
+$('ovBrand').onchange = setOverlays; $('ovLabel').onchange = setOverlays;
 $('rerBtn').onclick = async () => { $('rerStat').textContent = ' Re-rendering…';
   try { await render('rerender', { captions: readCaps($('caps2'), P.script.captions), copy: { caption: $('caption').value, hashtags: $('tags').value.split(/\s+/).filter(Boolean) } }); } catch (x) { $('e5').textContent = x.message; } $('rerStat').textContent = ''; };
 $('expBtn').onclick = async () => { $('e5').textContent = ''; $('expBtn').disabled = true;
   try { const r = await api(`/api/twin/projects/${P.id}/export`, { consent: true, music: !$('noMusic').checked, caption: $('caption').value, hashtags: $('tags').value.split(/\s+/).filter(Boolean) });
-    $('dl').innerHTML = `<a class="btn rose" href="${esc(r.download)}" download>⬇ Download MP4</a> <span class="s">Ready${r.music ? '' : ' (no music)'}. Remember the AI label when you post.</span>`; }
+    $('dl').innerHTML = `<a class="btn rose" href="${esc(r.download)}" download>⬇ Download MP4</a> <span class="s">Ready${r.music ? '' : ' (no music)'}.</span><div class="igcall"><b>⚠️ When you post: Advanced settings → turn on &ldquo;AI info&rdquo;</b>${esc(r.igAiLabelReminder || '')}</div>`; }
   catch (x) { $('e5').textContent = x.message; } finally { $('expBtn').disabled = !$('consent').checked; } };
 $('copyBtn').onclick = () => { navigator.clipboard?.writeText($('caption').value + '\n\n' + $('tags').value); toast('Copied'); };
 
@@ -111,7 +117,7 @@ fetch('/api/twin/config').then(r => r.ok ? r.json() : null).catch(() => null).th
   C = c; $('stubBanner').hidden = !c.stub;
   $('mood').innerHTML = c.moods.map(m => `<option>${esc(m)}</option>`).join('');
   $('music').innerHTML = c.tracks.map(t => `<option value="${t.id}"${t.id == c.defaultTrack ? ' selected' : ''}>${t.id == 'none' ? 'No music' : esc((t.name || t.label) + (t.bpm ? ' · ' + t.bpm + ' bpm' : ''))}</option>`).join('');
-  $('consentTxt').textContent = c.consent; $('igaTxt').textContent = '⚠️ ' + c.igAiLabelReminder;
+  $('consentTxt').textContent = c.consent; $('igaTxt').textContent = c.igAiLabelReminder;
   const pid = new URLSearchParams(location.search).get('project');
   if (/^[a-z0-9]{12}$/.test(pid || '')) { try { P = await api('/api/twin/projects/' + pid); SEL = P.avatar_id; TPL = P.template; $('prompt').value = P.inputs.prompt; $('salon').value = P.profile.salon; $('mood').value = P.inputs.mood; $('music').value = P.inputs.music; drawProd();
     return go(P.render ? 5 : P.script ? 3 : 2); } catch (x) { toast(x.message); } }

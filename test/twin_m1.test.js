@@ -108,7 +108,15 @@ test('flag on: guardrails, approval gate, stub render with AI label, export cons
     const p = (await j(B, '/api/twin/projects', { avatar_id: 'av_owner01', template: 'promo', music: 'velvet-house' })).body; made.push(p.id);
     assert.equal(p.path, 'full_gen_ai'); assert.equal(p.status, 'brief'); assert.equal(p.profile.salon, 'Olya Atelier');
     assert.equal((await j(B, `/api/twin/projects/${p.id}/product-url`, { contentType: 'image/gif' })).status, 400);
-    assert.equal((await j(B, `/api/twin/projects/${p.id}/product-url`, { contentType: 'image/png' })).status, 200);
+    const pu = await j(B, `/api/twin/projects/${p.id}/product-url`, { contentType: 'image/png' }); assert.equal(pu.status, 200);
+    // product photo: stored (same storage) with B-roll metadata for M3, never rendered on the avatar
+    const png = path.join(require('os').tmpdir(), `prod_${process.pid}.png`); await run('ffmpeg', ['-y', '-v', 'error', '-f', 'lavfi', '-i', 'color=c=0xe9dfd8:s=64x64', '-frames:v', '1', png]);
+    await st.putFile(pu.body.key, png, 'image/png'); fs.unlinkSync(png);
+    const pp = (await j(B, `/api/twin/projects/${p.id}/product`, { key: pu.body.key, mime: 'image/png' })).body;
+    assert.equal(pp.product.key, pu.body.key); assert.equal(pp.product.use, 'broll'); assert.equal(pp.product.milestone, 'M3'); assert.equal(pp.product.render_in_avatar, false);
+    assert.equal(pp.product.slot_start_s, undefined); assert.ok(pp.productUrl);
+    const meta = await st.getJSON(`${pu.body.key}.meta.json`); assert.equal(meta.render_in_avatar, false); assert.equal(meta.provider, 'runway'); assert.equal(meta.project_id, p.id);
+    assert.deepEqual(pp.overlays, { brand: false, ai_label: false }, 'overlays default off');
     assert.equal((await j(B, `/api/twin/projects/${p.id}/render`, {})).status, 400, 'render refused before a script exists');
     assert.equal((await j(B, `/api/twin/projects/${p.id}/draft`, {})).status, 202); assert.equal((await waitJob(B, p.id)).state, 'done');
     let q = (await j(B, `/api/twin/projects/${p.id}`)).body; assert.equal(q.status, 'awaiting_approval'); assert.equal(q.script.approved, false);
@@ -119,13 +127,22 @@ test('flag on: guardrails, approval gate, stub render with AI label, export cons
     q = (await j(B, `/api/twin/projects/${p.id}/approve`, { approved: true })).body; assert.equal(q.status, 'approved'); assert.equal(q.script.approved_by, 'owner');
     assert.equal((await j(B, `/api/twin/projects/${p.id}/export`, { consent: true })).status, 400, 'export needs a render');
     assert.equal((await j(B, `/api/twin/projects/${p.id}/render`, {})).status, 202); const jb = await waitJob(B, p.id); assert.equal(jb.state, 'done', jb.error);
-    q = (await j(B, `/api/twin/projects/${p.id}`)).body; assert.equal(q.status, 'review'); assert.equal(q.render.ai_label, 'AI-generated'); assert.equal(q.render.stub, true); assert.ok(q.previewUrl);
+    q = (await j(B, `/api/twin/projects/${p.id}`)).body; assert.equal(q.status, 'review'); assert.equal(q.render.ai_label, null); assert.deepEqual(q.render.overlays, { brand: false, ai_label: false }); assert.equal(q.render.stub, true); assert.ok(q.previewUrl);
+    assert.ok(!q.render.timeline.some(x => x.kind === 'product'), 'product photo is not rendered into the reel');
     const f = st.lp(q.render.key); assert.ok(fs.existsSync(f));
     const pr = JSON.parse(await run('ffprobe', ['-v', 'error', '-show_entries', 'format=duration:stream=width,height', '-of', 'json', f]));
     assert.equal(pr.streams.find(s => s.width).width, 1080); assert.equal(pr.streams.find(s => s.width).height, 1920); assert.ok(Math.abs(+pr.format.duration - q.total_s) < 0.3);
     const noC = await j(B, `/api/twin/projects/${p.id}/export`, { consent: false }); assert.equal(noC.status, 400); assert.match(noC.body.error, /I am the person in this AI twin/);
     const ex = await j(B, `/api/twin/projects/${p.id}/export`, { consent: true, music: false }); assert.equal(ex.status, 200); assert.match(ex.body.igAiLabelReminder, /AI info/); assert.equal(ex.body.music, false);
     q = (await j(B, `/api/twin/projects/${p.id}`)).body; assert.equal(q.status, 'exported'); assert.ok(q.renderVariants.music && q.renderVariants.no_music);
+    assert.equal(ex.body.aiLabel, 'AI-generated'); assert.deepEqual(ex.body.overlays, { brand: false, ai_label: false });
+    // overlay toggles: validated, persisted, invalidate cached variants, applied on re-render
+    assert.equal((await j(B, `/api/twin/projects/${p.id}/overlays`, { brand: 'yes' })).status, 400);
+    q = (await j(B, `/api/twin/projects/${p.id}/overlays`, { brand: true, ai_label: true })).body;
+    assert.deepEqual(q.overlays, { brand: true, ai_label: true }); assert.deepEqual(q.renderVariants, {}); assert.equal(q.render.overlays_stale, true);
+    assert.deepEqual((await j(B, `/api/twin/projects/${p.id}/overlays`, { ai_label: true })).body.overlays, { brand: true, ai_label: true }, 'partial update keeps the other toggle');
+    assert.equal((await j(B, `/api/twin/projects/${p.id}/rerender`, {})).status, 202); assert.equal((await waitJob(B, p.id)).state, 'done');
+    q = (await j(B, `/api/twin/projects/${p.id}`)).body; assert.equal(q.render.ai_label, 'AI-generated'); assert.deepEqual(q.render.overlays, { brand: true, ai_label: true });
     // unified My Reels: Twin row carries path + template; legacy Hair Reveal rows default to real_footage
     const legacy = id(); made.push(legacy); await st.putJSON(`projects/${legacy}/project.json`, { id: legacy, created: 'x', updated: '2000-01-01', status: 'planned', profile: { salon: 'Olya Atelier' } });
     const list = (await j(B, '/api/projects')).body;
@@ -137,15 +154,19 @@ test('flag on: guardrails, approval gate, stub render with AI label, export cons
 });
 
 // ---------- pure helpers ----------
-test('buildTwinAss wraps buildAss unchanged and always adds the AI label outside brand/caption zones', () => {
+test('buildTwinAss wraps buildAss; salon name and AI stamp are optional overlays, off by default', () => {
   const args = { lines: [{ start_s: 0, end_s: 2, text: 'Hi' }], salon: 'Olya Atelier', duration: 30, tone: 'luxe' };
-  const base = P.buildAss(args), a = A.buildTwinAss({ ...args, slates: [{ start_s: 0, end_s: 3, text: 'AI B-roll (stub)\nfoam' }] });
-  // every Hair Reveal line is kept except the Brand style, which Twin moves to a bottom band (off the presenter's face)
-  for (const line of base.trim().split('\n').filter(l => !l.startsWith('Style: Brand,'))) assert.ok(a.includes(line), line);
-  assert.match(a, new RegExp(`Style: Brand,[^\\n]*,2,90,90,${1920 - A.TWIN_BRAND_ZONE.bottomY},1`));
-  assert.match(a, /Dialogue: 2,0:00:00\.00,0:00:30\.00,AILabel,,0,0,0,,AI-generated/); assert.match(a, /AI B-roll \(stub\)\\Nfoam/);
-  const capTop = P.CAPTION_ZONE.bottomY - 3 * P.CAPTION_ZONE.size;
-  assert.ok(A.AI_LABEL_ZONE.topY > 250 && A.AI_LABEL_ZONE.topY + A.AI_LABEL_ZONE.size < capTop);
+  const base = P.buildAss(args), slates = [{ start_s: 0, end_s: 3, text: 'AI B-roll (stub)\nfoam' }];
+  const off = A.buildTwinAss({ ...args, slates }), on = A.buildTwinAss({ ...args, slates, overlays: { brand: true, ai_label: true } });
+  // every Hair Reveal line is kept except the brand (Twin restyles it, and only draws it when switched on)
+  for (const line of base.trim().split('\n').filter(l => !l.startsWith('Style: Brand,') && !/^Dialogue: 0,[^,]+,[^,]+,Brand,/.test(l))) { assert.ok(off.includes(line), line); assert.ok(on.includes(line), line); }
+  assert.doesNotMatch(off, /,AILabel,,/); assert.doesNotMatch(off, /,Brand,,0,0,0,,Olya Atelier/); assert.doesNotMatch(off, /,Pill,,/);
+  assert.match(on, /Dialogue: 2,0:00:00\.00,0:00:30\.00,AILabel,,0,0,0,,AI-generated/); assert.match(on, /Dialogue: 1,0:00:00\.00,0:00:30\.00,Brand,,0,0,0,,Olya Atelier/); assert.match(on, /,Pill,,0,0,0,,\{\\an7\\pos\(0,0\)/);
+  assert.match(off, /AI B-roll \(stub\)\\Nfoam/);
+  assert.match(on, new RegExp(`Style: Brand,[^\\n]*,2,90,90,${1920 - A.TWIN_BRAND_ZONE.bottomY},1`));
+  // label: top safe area (~220-260), clear of IG's top UI and of the captions
+  assert.ok(A.AI_LABEL_ZONE.topY >= 210 && A.AI_LABEL_ZONE.topY + A.AI_LABEL_ZONE.size <= 270);
+  assert.ok(A.AI_LABEL_ZONE.topY + A.AI_LABEL_ZONE.size < P.CAPTION_ZONE.bottomY - 3 * P.CAPTION_ZONE.size);
   assert.ok(A.TWIN_BRAND_ZONE.bottomY - A.TWIN_BRAND_ZONE.size > P.CAPTION_ZONE.bottomY);
 });
 test('stub vendor clients make no network calls', async () => {
