@@ -19,14 +19,15 @@ const ST = { ready: 'Ready', training: 'Training…', failed: "Couldn't train" }
 async function loadLib() { L = await api('/api/twin/avatars'); if (!SEL || !L.avatars.some(a => a.id == SEL && a.selectable)) SEL = L.preselected; }
 async function drawLib(refetch = true) {
   try { if (refetch || !L) await loadLib(); } catch (x) { $('e0').textContent = x.message; return; }
-  const add = `<button class="add" id="addTile"><b>+</b>Add avatar<span style="font-size:11px;margin-top:4px">you or a stylist</span></button>`;
+  const canCreate = !!(C && C.twinCreation); // own-twin creation (M4) is off: stock presenters only
+  const add = !canCreate ? '' : `<button class="add" id="addTile"><b>+</b>Add avatar<span style="font-size:11px;margin-top:4px">you or a stylist</span></button>`;
   const cards = L.avatars.map(a => `<div class="av ${a.id == SEL ? 'sel' : ''} ${a.selectable ? '' : 'dis'}" data-id="${a.id}">
     <div class="chips">${a.sample ? '<span class="chip sample">Sample</span>' : ''}<span class="chip ${a.card_status}">${ST[a.card_status]}</span>${a.is_default ? '<span class="chip def">★ Default</span>' : ''}${a.is_last_used ? '<span class="chip last">Last used</span>' : ''}</div>
     <img class="th" src="${esc(a.thumbnail)}" alt="">
     <div class="b"><div class="n">${esc(a.name)}</div><div class="s" style="margin:0;font-size:12px">${esc(a.label)}${a.sample ? ' · stock AI presenter' : ''}</div>
     <div class="acts">${a.sample ? '' : `<button data-act="rename">Rename</button>`}${a.selectable && !a.is_default ? `<button data-act="default">Set default</button>` : ''}<button data-act="delete">${a.sample ? 'Hide' : 'Delete'}</button></div></div></div>`).join('');
-  $('lib').innerHTML = (L.avatars.length ? '' : `<div class="empty"><div style="font-size:30px">🎙️</div><b>No avatars yet</b><p class="s" style="margin:6px 0 0">Add yourself or a stylist. Training takes a few minutes, then your twin can talk for you.</p></div>`) + `<div class="lib">${cards}${add}</div>`;
-  $('addTile').onclick = () => { $('avName').value = ''; $('eAdd').textContent = ''; $('addM').classList.add('on'); };
+  $('lib').innerHTML = (L.avatars.length ? '' : `<div class="empty"><div style="font-size:30px">🎙️</div><b>No avatars yet</b><p class="s" style="margin:6px 0 0">${canCreate ? 'Add yourself or a stylist. Training takes a few minutes, then your twin can talk for you.' : 'Stock AI presenters will appear here.'}</p></div>`) + `<div class="lib">${cards}${add}</div>`;
+  if ($('addTile')) $('addTile').onclick = () => { $('avName').value = ''; $('eAdd').textContent = ''; $('addM').classList.add('on'); };
   $('lib').querySelectorAll('.av').forEach(d => d.onclick = async e => {
     const act = e.target.dataset?.act, aid = d.dataset.id, a = L.avatars.find(x => x.id == aid);
     try {

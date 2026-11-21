@@ -64,4 +64,25 @@ async function ensureCors(origins) {
     return 'cors set';
   } catch (e) { return 'cors not set: ' + e.message; }
 }
-module.exports = { safeKey, R2, presignPut, presignGet, verifyLocal, putFile, getFile, exists, putJSON, getJSON, listProjectIds, ensureCors, LOCAL, lp };
+
+// Small ops documents (e.g. the daily spend ledger ops/spend/YYYY-MM-DD.json) with optimistic concurrency.
+// R2: conditional PUT (If-Match / If-None-Match: *). Local (dev only): same semantics emulated with a content hash.
+const opsKey = k => { if (!/^ops\/spend\/\d{4}-\d{2}-\d{2}\.json$/.test(k)) throw new Error('bad ops key'); return k; };
+const hash = b => '"' + crypto.createHash('sha1').update(b).digest('hex') + '"';
+async function getOpsJSON(key) {
+  opsKey(key);
+  if (R2) { try { const o = await s3.send(new cmd.GetObjectCommand({ Bucket, Key: key })); return { data: JSON.parse(await o.Body.transformToString()), etag: o.ETag }; }
+    catch (e) { if (e.name === 'NoSuchKey' || e.$metadata?.httpStatusCode === 404) return { data: null, etag: null }; throw e; } }
+  const f = path.join(LOCAL, key); if (!fs.existsSync(f)) return { data: null, etag: null };
+  const b = fs.readFileSync(f, 'utf8'); return { data: JSON.parse(b), etag: hash(b) };
+}
+class PreconditionFailed extends Error { constructor() { super('precondition failed'); this.code = 'precondition_failed'; } }
+async function putOpsJSON(key, obj, etag) { // etag null => create only if absent
+  opsKey(key); const body = JSON.stringify(obj, null, 2);
+  if (R2) { try { const r = await s3.send(new cmd.PutObjectCommand({ Bucket, Key: key, Body: body, ContentType: 'application/json', ...(etag ? { IfMatch: etag } : { IfNoneMatch: '*' }) })); return r.ETag; }
+    catch (e) { const c = e.$metadata?.httpStatusCode; if (c === 412 || c === 409 || e.name === 'PreconditionFailed') throw new PreconditionFailed(); throw e; } }
+  const f = path.join(LOCAL, key); const cur = fs.existsSync(f) ? hash(fs.readFileSync(f, 'utf8')) : null;
+  if ((etag || null) !== cur) throw new PreconditionFailed();
+  fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, body); return hash(body);
+}
+module.exports = { getOpsJSON, putOpsJSON, PreconditionFailed, safeKey, R2, presignPut, presignGet, verifyLocal, putFile, getFile, exists, putJSON, getJSON, listProjectIds, ensureCors, LOCAL, lp };

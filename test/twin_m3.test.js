@@ -106,9 +106,9 @@ test('m3: promo timeline order is avatar -> B-roll -> end card with crossfades',
   assert.ok(args.indexOf('a.mp4') < args.indexOf('b.mp4') && args.indexOf('b.mp4') < args.lastIndexOf('p.png'));
   assert.match(fc, /\[s0\]\[s1\]xfade=transition=fade:duration=0\.4:offset=17\.6\[x1\];\[x1\]\[s2\]xfade=transition=fade:duration=0\.4:offset=22\.2\[x2\]/);
   assert.match(fc, /overlay=\(W-w\)\/2:1060-h\/2:enable='gte\(t,2\.80\)'/, 'product composited on the clean surface at the end of style-a B-roll');
-  assert.match(fc, /alphaextract|colorchannelmixer=rr=0:gg=0:bb=0:aa=0\.5/, 'end card has a soft contact shadow from the cutout alpha'); assert.match(fc, /\[shc\]\[pa\]overlay=0:0:format=rgb\[epc\]/, 'product drawn over its shadow');
-  assert.match(A.BROLL_PROMPTS.a, /No people/); assert.match(A.BROLL_PROMPTS.b, /lifts a hair product bottle into view and smiles/); assert.match(A.BROLL_PROMPTS.b, /No text/);
-  assert.deepEqual(A.stillArgs('raw.mp4', 1.5, 's.jpg').slice(-5, -1), ['-vf', 'scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280', '-q:v', '2']);
+  assert.match(fc, /colorchannelmixer=rr=0:gg=0:bb=0:aa=0\.5/, 'end card has a soft contact shadow from the cutout alpha'); assert.match(fc, /\[shc\]\[pa\]overlay=0:0:format=rgb\[epc\]/, 'product drawn over its shadow');
+  assert.match(A.BROLL_PROMPTS.a, /stays completely clear and empty, no objects appear/);
+  assert.deepEqual(Object.keys(A.BROLL_PROMPTS), ['a'], 'presenter-holding-product prompt is removed'); assert.equal(A.stillArgs, undefined);
 });
 
 test('m3: promo renderHeygen end-to-end with mocked HeyGen + Runway (real ffmpeg); B-roll clip reused on re-render', { timeout: 180000 }, async () => {

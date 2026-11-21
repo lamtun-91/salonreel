@@ -44,6 +44,7 @@ const spendAllowed = (o = {}, env = process.env) => o.allowSpend === true || env
 function modelFor(o = {}, env = process.env) {
   const m = String(o.model || env.RUNWAY_MODEL || DEFAULT_MODEL).trim();
   if (!MODELS[m]) throw new RunwayError(`Unsupported Runway model "${m}" (allowed: ${Object.keys(MODELS).join(', ')})`, { code: 'bad_model' });
+  if (env.NODE_ENV === 'production' && m !== DEFAULT_MODEL && env.ALLOW_ENGINE_OVERRIDE !== '1') throw new RunwayError(`Runway model is pinned to ${DEFAULT_MODEL} in production`, { code: 'bad_model' });
   return m;
 }
 function estimateCost({ model, duration }) {

@@ -5,15 +5,25 @@
 const fs = require('fs'), path = require('path');
 const st = require('./storage'), A = require('./avatar'), MASTER = require('./master'), MUSIC = require('./music');
 const HG = require('./heygen'), RW = require('./runway'), S = require('./studio'), TR = require('./twin_render');
+const HGC = require('./heygen_client'), RWC = require('./runway_client'), SP = require('./spend');
 
 const TWIN_CONSENT = 'I am the person in this AI twin, or I have their permission, and I will turn on Instagram\'s AI info label when I post.';
 const IG_AI_REMINDER = 'When you post this Reel, turn on Instagram\'s "AI info" label (Advanced settings → AI label) - this video was made with AI.';
 const PRODUCT_TYPES = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
 const enabled = (env = process.env) => env.ENABLE_AI_TWIN === '1';
+// M4 (own twin creation) is not approved: creating/training avatars is refused unless ENABLE_TWIN_CREATION=1. Stock avatars only.
+const creationEnabled = (env = process.env) => env.ENABLE_TWIN_CREATION === '1';
+const CREATION_OFF_MSG = 'Creating your own AI twin is not available yet. Please use one of the stock presenters.';
+const CREATION_ROUTES = ['/api/twin/avatars/upload-url', '/api/twin/avatars', '/api/twin/avatars/:aid/consent', '/api/twin/demo/reset'];
+// Client IP for the per-IP paid-render limit (behind Render/Cloudflare): CF-Connecting-IP / True-Client-IP are set by the edge.
+const clientIp = q => String(q.get?.('cf-connecting-ip') || q.get?.('true-client-ip') || String(q.get?.('x-forwarded-for') || '').split(',').map(x => x.trim()).filter(Boolean).pop() || q.socket?.remoteAddress || 'unknown');
 // Express middleware placed before express.static: hides the Twin page and assets when the flag is off.
 const staticGuard = (env = process.env) => (q, s, n) => (!enabled(env) && /^\/twin(\.html|\.js|\/|$)/.test(q.path)) ? s.status(404).type('text').send('Not found') : n();
 
-function mount({ app, llm, parseJSON, run, cfg, TRACKS, D, id, wrap, slug = A.SALON_SLUG, trainMs = 8000 }) {
+function mount({ app, llm, parseJSON, run, cfg, TRACKS, D, id, wrap, slug = A.SALON_SLUG, trainMs = 8000, env = process.env, ledger = null, hg = HG, rw = RW, renderHeygen = TR.renderHeygen }) {
+  // global daily spend ledger (R2 in prod; local disk only outside production - fail closed if prod has no R2)
+  const opsStore = (st.R2 || env.NODE_ENV !== 'production') ? st : { getOpsJSON: async () => { throw new Error('no R2 for the spend ledger in production'); }, putOpsJSON: async () => { throw new Error('no R2'); } };
+  ledger = ledger || SP.createLedger({ store: opsStore, env });
   const err = (code, msg, extra) => Object.assign(new Error(msg), { status: code, ...extra });
   // like server.js wrap, but honours err.status (400/404/409) and blocklist details
   const w = fn => (q, s) => fn(q, s).catch(e => { if (!e.status) console.error(e); s.status(e.status || 500).json({ error: e.message, ...(e.blocked ? { blocked: e.blocked } : {}) }); });
@@ -34,15 +44,16 @@ function mount({ app, llm, parseJSON, run, cfg, TRACKS, D, id, wrap, slug = A.SA
     const a = await st.getJSON(avKey(aid)); if (A.advanceStub(a)) await st.putJSON(avKey(aid), a); return { a, L }; };
   async function listCards() {
     const L = await lib(), avs = [];
-    for (const aid of L.avatar_ids) { try { const a = await st.getJSON(avKey(aid)); if (A.advanceStub(a)) await st.putJSON(avKey(aid), a); avs.push(a); } catch {} }
+    for (const aid of L.avatar_ids) { try { const a = await st.getJSON(avKey(aid)); if (A.advanceStub(a)) await st.putJSON(avKey(aid), a); if (creationEnabled(env) || a.kind === 'sample') avs.push(a); } catch {} }
     // owner/stylist first, Samples last
     avs.sort((x, y) => (x.kind === 'sample') - (y.kind === 'sample'));
     return { avatars: avs.map(a => A.cardView(a, L)), default_avatar_id: L.default_avatar_id, last_used_avatar_id: L.last_used_avatar_id, preselected: A.preselect(L, avs), stub: true };
   }
 
-  app.get('/api/twin/config', (q, s) => s.json({ enabled: true, stub: true, templates: A.TEMPLATES, defaultSalon: A.DEFAULT_SALON, moods: S.MOODS,
+  app.post(CREATION_ROUTES, (q, s, n) => creationEnabled(env) ? n() : s.status(403).json({ error: CREATION_OFF_MSG, creation: false }));
+  app.get('/api/twin/config', (q, s) => s.json({ enabled: true, stub: !hg.configured(), twinCreation: creationEnabled(env), templates: A.TEMPLATES, defaultSalon: A.DEFAULT_SALON, moods: S.MOODS,
     tracks: Object.entries(TRACKS).map(([k, v]) => ({ id: k, label: v.label, name: v.name, moodLabel: v.moodLabel, bpm: v.bpm })), defaultTrack: MUSIC.DEFAULT,
-    heygenTest: HG.testMode(), heygenTestNote: HG.TEST_MODE_NOTE, heygenConfigured: HG.configured(), runwayConfigured: RW.configured(), llmLive: live(), consent: TWIN_CONSENT, igAiLabelReminder: IG_AI_REMINDER,
+    heygenTest: HG.testMode(), heygenTestNote: HG.TEST_MODE_NOTE, heygenConfigured: hg.configured(), runwayConfigured: rw.configured(), llmLive: live(), consent: TWIN_CONSENT, igAiLabelReminder: IG_AI_REMINDER,
     aiLabel: A.AI_LABEL, defaultOverlays: A.DEFAULT_OVERLAYS, duration: A.DURATION, poweredBy: { name: 'Runway', text: 'Powered by Runway', url: 'https://runwayml.com' } }));
 
   app.get('/api/twin/avatars', w(async (q, s) => s.json(await listCards())));
@@ -81,8 +92,10 @@ function mount({ app, llm, parseJSON, run, cfg, TRACKS, D, id, wrap, slug = A.SA
   const view = async p => ({ ...p, previewUrl: p.render ? await st.presignGet(p.render.key) : null, productUrl: p.product?.key ? await st.presignGet(p.product.key) : null, storage: st.R2 ? 'r2' : 'local' });
   const jobs = {};
   const job = (name, pre, fn) => w(async (q, s) => {
-    const p = await load(q.params.id); await pre(p, q);
+    const p = await load(q.params.id);
     if (jobs[p.id]?.state === 'running') return s.status(409).json({ error: 'Another step is still running', job: jobs[p.id] });
+    await pre(p, q);
+    if (jobs[p.id]?.state === 'running') { if (q.spendRes) await ledger.release(q.spendRes, null, 'job_conflict').catch(() => {}); return s.status(409).json({ error: 'Another step is still running', job: jobs[p.id] }); }
     const j = jobs[p.id] = { name, state: 'running', started: Date.now() };
     s.status(202).json({ job: j }); st.putJSON(`projects/${p.id}/job.json`, j).catch(() => {});
     fn(p, q).then(() => { j.state = 'done'; }).catch(e => { if (!e.status) console.error(name, e); j.state = 'error'; j.error = e.message; })
@@ -97,6 +110,7 @@ function mount({ app, llm, parseJSON, run, cfg, TRACKS, D, id, wrap, slug = A.SA
 
   app.post('/api/twin/projects', w(async (q, s) => {
     const b = q.body || {}, { a, L } = await getAv(String(b.avatar_id || ''));
+    if (!creationEnabled(env) && a.kind !== 'sample') throw err(403, CREATION_OFF_MSG);
     if (!A.selectable(a)) throw err(400, a.status === 'training' || a.status === 'pending_consent' ? 'This avatar is still training - pick a ready one' : 'This avatar can\'t be used - pick a ready one');
     const template = A.TEMPLATES.some(t => t.id === b.template) ? b.template : 'tip';
     const chk = A.checkText(b.prompt, 'prompt'); if (!chk.ok) throw new A.BlockedError(chk);
@@ -155,21 +169,52 @@ function mount({ app, llm, parseJSON, run, cfg, TRACKS, D, id, wrap, slug = A.SA
 
   // ---------- M2 live render (HeyGen Sample avatar) - only when HEYGEN_API_KEY + HEYGEN_LIVE=1; spend additionally needs HEYGEN_ALLOW_SPEND=1 ----------
   const probeDuration = async f => { const o = await run('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', f]); return +String(o?.stdout ?? o).trim(); };
-  async function renderLive(p, { musicOn = p.musicOn } = {}) {
-    const dir = D('cache', p.id);
-    // M3: Promo gets Runway B-roll + product end card only when Runway is live (RUNWAY_LIVE=1 + key) and a product photo is stored.
-    let promo = null;
-    if (p.template === 'promo' && p.product?.key && RW.configured()) {
-      fs.mkdirSync(dir, { recursive: true });
-      const productFile = await st.getFile(p.product.key, path.join(dir, 'product' + path.extname(p.product.key)));
-      promo = { productFile, styleAStill: path.join(__dirname, 'assets', 'broll_countertop.jpg'), includeB: false };
-    }
-    const r = await TR.renderHeygen(p, { hg: HG, run, probeDuration, master: MASTER.masterFile, dir, musicOn, rw: promo ? RW : null, promo });
-    p.heygen = r.heygen;
-    const key = `projects/${p.id}/renders/${path.basename(r.out)}`; await st.putFile(key, r.out, 'video/mp4'); fs.unlinkSync(r.out);
-    return { key, duration: r.duration, music: r.music, track: r.track, loudness: r.loudness, overlays: r.overlays, ai_label: r.ai_label, stub: false, heygen_video_id: r.heygen.video_id, broll: r.broll || null, timeline: r.timeline ? r.timeline.segments.map(x => ({ kind: x.kind, start_s: x.start_s, end_s: x.end_s })) : null, at: new Date().toISOString() };
+  // Paid clips are stored next to the project (projects/<id>/raw/) so re-edits after a restart reuse them for $0.
+  const CLIPS = { heygen: 'heygen_raw.mp4', runway: 'broll_a.mp4' };
+  const clipKey = (p, name) => `projects/${p.id}/raw/${name}`;
+  async function restoreClips(p, dir) {
+    fs.mkdirSync(dir, { recursive: true });
+    for (const name of Object.values(CLIPS)) { const f = path.join(dir, name);
+      if (!fs.existsSync(f) && await st.exists(clipKey(p, name)).catch(() => false)) await st.getFile(clipKey(p, name), f).catch(() => {}); }
   }
-  const renderAny = (p, o) => (HG.configured() && (p.avatar?.heygen_avatar_id || p.avatar?.sample)) ? renderLive(p, o) : renderStub(p, o);
+  const wantsPromoBroll = p => p.template === 'promo' && !!p.product?.key && rw.configured(); // no product photo => no B-roll at all
+  // What a live render of p would pay for right now (stored clips are free). Assumes restoreClips ran when dir is given.
+  async function paidNeeds(p, dir = D('cache', p.id)) {
+    if (!(hg.configured() && (p.avatar?.heygen_avatar_id || p.avatar?.sample))) return [];
+    const have = async name => fs.existsSync(path.join(dir, name)) || await st.exists(clipKey(p, name)).catch(() => false);
+    const items = [];
+    if (!(p.heygen?.video_id && await have(CLIPS.heygen))) { const engine = hg.engine(); items.push({ provider: 'heygen', engine, est_usd: HGC.estimateCost({ script: p.script.text, engine }).usd }); }
+    if (wantsPromoBroll(p) && !(await have(CLIPS.runway))) { const model = RWC.modelFor({}, env); items.push({ provider: 'runway', engine: model, est_usd: RWC.estimateCost({ model, duration: 5 }).usd }); }
+    return items;
+  }
+  async function renderLive(p, { musicOn = p.musicOn, ip = 'unknown', reservation = null } = {}) {
+    const dir = D('cache', p.id);
+    await restoreClips(p, dir);
+    const needs = await paidNeeds(p, dir);
+    if (needs.length && !reservation) reservation = await ledger.reserve({ items: needs, ip, project: p.id });
+    const submitted = new Set();
+    const hgW = { ...hg, createVideo: async (b, o) => {
+      try { const c = await hg.createVideo(b, o); submitted.add('heygen'); if (reservation) await ledger.reconcile(reservation, 'heygen', null).catch(e => console.error('[spend]', e.message)); return c; }
+      catch (e) { submitted.add('heygen'); if (reservation && SP.definiteRejection(e)) await ledger.release(reservation, 'heygen', e.code || 'rejected').catch(() => {}); throw e; } } };
+    const rwW = { ...rw, imageToVideo: async (b, o) => {
+      try { const c = await rw.imageToVideo(b, o); submitted.add('runway'); return c; }
+      catch (e) { submitted.add('runway'); if (reservation && SP.definiteRejection(e)) await ledger.release(reservation, 'runway', e.code || 'rejected').catch(() => {}); throw e; } },
+      waitForTask: async (tid, o) => { const t = await rw.waitForTask(tid, o); if (reservation) await ledger.reconcile(reservation, 'runway', t.cost != null ? t.cost * RWC.USD_PER_CREDIT : null).catch(e => console.error('[spend]', e.message)); return t; } };
+    // Promo: clean-surface B-roll + product end card, only when Runway is live and a product photo is stored.
+    let promo = null;
+    if (wantsPromoBroll(p)) {
+      const productFile = await st.getFile(p.product.key, path.join(dir, 'product' + path.extname(p.product.key)));
+      promo = { productFile, styleAStill: path.join(__dirname, 'assets', 'broll_countertop.jpg'), compositeProduct: false };
+    }
+    let r;
+    try { r = await renderHeygen(p, { hg: hgW, run, probeDuration, master: MASTER.masterFile, dir, musicOn, rw: promo ? rwW : null, promo }); }
+    catch (e) { if (reservation) for (const it of reservation.items) if (!submitted.has(it)) await ledger.release(reservation, it, 'not_submitted').catch(() => {}); throw e; }
+    p.heygen = r.heygen;
+    for (const name of Object.values(CLIPS)) { const f = path.join(dir, name); if (fs.existsSync(f) && !(await st.exists(clipKey(p, name)).catch(() => false))) await st.putFile(clipKey(p, name), f, 'video/mp4').catch(e => console.error('clip store failed', e.message)); }
+    const key = `projects/${p.id}/renders/${path.basename(r.out)}`; await st.putFile(key, r.out, 'video/mp4'); fs.unlinkSync(r.out);
+    return { key, duration: r.duration, music: r.music, track: r.track, loudness: r.loudness, overlays: r.overlays, ai_label: r.ai_label, stub: false, heygen_video_id: r.heygen.video_id, broll: r.broll || null, timeline: r.timeline ? r.timeline.segments.map(x => ({ kind: x.kind, start_s: x.start_s, end_s: x.end_s })) : null, spend: reservation ? { id: reservation.id, date: reservation.date } : null, at: new Date().toISOString() };
+  }
+  const renderAny = (p, o) => (hg.configured() && (p.avatar?.heygen_avatar_id || p.avatar?.sample)) ? renderLive(p, o) : renderStub(p, o);
 
   // ---------- stub render ----------
   async function renderStub(p, { musicOn = p.musicOn } = {}) {
@@ -188,9 +233,11 @@ function mount({ app, llm, parseJSON, run, cfg, TRACKS, D, id, wrap, slug = A.SA
     return { key, duration: total, music: !!musicFile, track: musicFile ? p.inputs.music : 'none', loudness, overlays: A.cleanOverlays(p.overlays), ai_label: A.cleanOverlays(p.overlays).ai_label ? A.AI_LABEL : null, stub: true, timeline, at: new Date().toISOString() };
   }
   const needApproved = async p => { if (!p.script?.approved) throw err(400, 'Approve the script before rendering'); };
-  app.post('/api/twin/projects/:id/render', job('render', needApproved, async p => {
+  // Paid render: reserve the estimated cost (daily cap + per-IP limit) BEFORE the job starts so the salon gets the message right away.
+  const reserveFor = async (p, q) => { await restoreClips(p, D('cache', p.id)); const items = await paidNeeds(p); if (items.length) q.spendRes = await ledger.reserve({ items, ip: clientIp(q), project: p.id }); };
+  app.post('/api/twin/projects/:id/render', job('render', async (p, q) => { await needApproved(p); await reserveFor(p, q); }, async (p, q) => {
     p.status = 'rendering'; await save(p);
-    try { p.render = await renderAny(p); p.renderVariants = { [p.render.music ? 'music' : 'no_music']: p.render.key }; p.status = 'review'; }
+    try { p.render = await renderAny(p, { ip: clientIp(q), reservation: q.spendRes || null }); p.renderVariants = { [p.render.music ? 'music' : 'no_music']: p.render.key }; p.status = 'review'; }
     catch (e) { p.status = 'error'; p.error = e.message; await save(p); throw e; }
     await save(p); }));
   app.post('/api/twin/projects/:id/rerender', job('rerender', async (p, q) => { await needApproved(p); if (!p.render) throw err(400, 'Render first');
@@ -199,7 +246,7 @@ function mount({ app, llm, parseJSON, run, cfg, TRACKS, D, id, wrap, slug = A.SA
     if (Array.isArray(b.captions)) p.script.captions = require('./pipeline').cleanSegments(b.captions.map(c => ({ ...c, text: String(c.text || '').slice(0, 80) })), p.total_s, 'text');
     if (b.copy) p.copy = { caption: String(b.copy.caption ?? p.copy?.caption ?? '').slice(0, 2200), hashtags: Array.isArray(b.copy.hashtags) ? b.copy.hashtags.slice(0, 15) : p.copy?.hashtags || [] };
     p.status = 'rendering'; await save(p);
-    try { p.render = await renderAny(p); p.renderVariants = { [p.render.music ? 'music' : 'no_music']: p.render.key }; p.status = 'review'; }
+    try { p.render = await renderAny(p, { ip: clientIp(q) }); p.renderVariants = { [p.render.music ? 'music' : 'no_music']: p.render.key }; p.status = 'review'; }
     catch (e) { p.status = 'error'; p.error = e.message; await save(p); throw e; }
     await save(p); }));
   app.post('/api/twin/projects/:id/export', w(async (q, s) => {
@@ -208,12 +255,16 @@ function mount({ app, llm, parseJSON, run, cfg, TRACKS, D, id, wrap, slug = A.SA
     if (b.consent !== true) throw err(400, 'Please confirm: ' + TWIN_CONSENT);
     const music = b.music !== false && p.render.music;
     const vk = music ? 'music' : 'no_music';
-    if (!p.renderVariants?.[vk]) { const r = await renderAny(p, { musicOn: music }); p.renderVariants = { ...(p.renderVariants || {}), [vk]: r.key }; }
+    if (!p.renderVariants?.[vk]) { const r = await renderAny(p, { musicOn: music, ip: clientIp(q) }); p.renderVariants = { ...(p.renderVariants || {}), [vk]: r.key }; }
     if (b.caption != null || b.hashtags) p.copy = { caption: String(b.caption ?? p.copy?.caption ?? '').slice(0, 2200), hashtags: Array.isArray(b.hashtags) ? b.hashtags.slice(0, 15) : p.copy?.hashtags || [] };
     p.consent = { text: TWIN_CONSENT, accepted: true, at: new Date().toISOString() };
     p.export = { at: new Date().toISOString(), music, key: p.renderVariants[vk], overlays: A.cleanOverlays(p.overlays), ai_label: A.cleanOverlays(p.overlays).ai_label ? A.AI_LABEL : null, ig_ai_label_reminder: true }; p.status = 'exported'; await save(p);
     s.json({ download: await st.presignGet(p.renderVariants[vk], `salonreel-twin-${p.id}${music ? '' : '-no-music'}.mp4`), music, caption: p.copy?.caption, hashtags: p.copy?.hashtags, igAiLabelReminder: IG_AI_REMINDER, aiLabel: A.AI_LABEL, overlays: A.cleanOverlays(p.overlays) });
   }));
+  // ops (read-only): today's spend counter totals (no IPs/reservation details) and a dry-run budget check that reserves nothing
+  app.get('/api/twin/ops/spend', w(async (q, s) => { const x = await ledger.status(); s.json({ date: x.date, tz: x.tz, cap_usd: x.cap_usd, total_usd: x.total_usd, remaining_usd: x.remaining_usd, per_ip_limit: x.per_ip_limit, reservations: x.reservations, storage: st.R2 ? 'r2' : 'local', key: `ops/spend/${x.date}.json` }); }));
+  app.post('/api/twin/ops/spend/check', w(async (q, s) => { const est = +q.body?.est_usd; if (!(est >= 0) || est > 100) throw err(400, 'est_usd must be 0-100');
+    const x = await ledger.status(); const ok = x.total_usd + est <= x.cap_usd + 1e-9; s.json({ would_allow: ok, est_usd: est, total_usd: x.total_usd, cap_usd: x.cap_usd, remaining_usd: x.remaining_usd, message: ok ? null : SP.CAP_MSG }); }));
   app.use('/api/twin', (q, s) => s.status(404).json({ error: 'Not found' }));
 }
-module.exports = Object.assign(mount, { enabled, staticGuard, TWIN_CONSENT, IG_AI_REMINDER, PRODUCT_TYPES });
+module.exports = Object.assign(mount, { enabled, creationEnabled, clientIp, CREATION_OFF_MSG, staticGuard, TWIN_CONSENT, IG_AI_REMINDER, PRODUCT_TYPES });

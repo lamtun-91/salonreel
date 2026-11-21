@@ -33,6 +33,8 @@ const estimateSeconds = script => SP.guardSeconds(script);
 function engineFor(o = {}, env = process.env) {
   const e = String(o.engine || env.HEYGEN_ENGINE || DEFAULT_ENGINE).trim();
   if (!RATES_PER_MIN[e]) throw new HeyGenError(`Unsupported HeyGen engine "${e}" (allowed: ${Object.keys(RATES_PER_MIN).join(', ')})`, { code: 'bad_engine' });
+  // production pin: only Avatar III unless an explicit override is set (never set in Render without owner approval)
+  if (env.NODE_ENV === 'production' && e !== DEFAULT_ENGINE && env.ALLOW_ENGINE_OVERRIDE !== '1') throw new HeyGenError(`HeyGen engine is pinned to ${DEFAULT_ENGINE} in production`, { code: 'bad_engine' });
   return e;
 }
 // Rate for engine + look type; an unknown look type is priced at the engine's most expensive row (errs high).

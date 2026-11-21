@@ -240,16 +240,13 @@ function twinAssembleArgs({ talking, total, assPath, musicFile, musicStart = 0, 
 const twinTotal = (clipDuration, cap = DURATION.max) => r2(Math.max(1, Math.min(cap, +clipDuration || 0)));
 
 // ---------- M3: Promo = avatar segment -> Runway B-roll clip(s) -> product end card ----------
-// Prompts (Gen-4 Turbo image_to_video). Style a: the still is a clean, people-free salon surface; the clip ends on an empty spot
-// where OUR editor composites the salon's real product photo. Style b: the still is a frame of the HeyGen presenter; Runway animates
-// her lifting a product (the product itself is invented by the model, so it is never presented as the salon's real product).
+// Prompt (Gen-4 Turbo image_to_video). The still is a clean, people-free salon surface; the clip ends on an empty spot
+// before the salon's real product photo appears on the end card. Presenter-holding-product clips are not generated (removed in prod).
 const BROLL_PROMPTS = Object.freeze({
-  a: 'Slow, smooth cinematic push-in across a clean, softly lit salon countertop of pale stone. Warm natural window light, shallow depth of field, a few out-of-focus salon tools at the edges. The camera settles on an empty, uncluttered patch of countertop in the lower centre of the frame and holds. No people, no hands, no text, no logos, no products.',
-  b: 'She lifts a hair product bottle into view and smiles warmly at the camera, holding it at chest height. Natural, gentle movement, steady camera, soft studio lighting. No text, no logos, no captions.',
+  // validated on a live gen4_turbo render (task ba8ca5c9, 2026-11-20): clean counter, no invented objects
+  a: 'A slow, smooth push-in toward the empty marble countertop, soft natural light, the counter stays completely clear and empty, no objects appear, photorealistic.',
 });
 const PROMO_FADE = 0.4;
-// ffmpeg args to grab a reference still (style b) from the HeyGen raw clip, sized for Runway's 720:1280 ratio
-const stillArgs = (raw, t, out) => ['-y', '-v', 'error', '-ss', String(t), '-i', raw, '-frames:v', '1', '-vf', 'scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280', '-q:v', '2', out];
 // Segment order + crossfade offsets. segments: [{kind:'avatar'|'broll'|'endcard', dur}] -> starts, xfade offsets, total
 function promoTimeline(segments, fade = PROMO_FADE) {
   if (!segments.length || segments[0].kind !== 'avatar') throw new Error('Promo must start with the avatar segment');
@@ -298,4 +295,4 @@ function promoAssembleArgs({ avatar, brolls = [], productFile, endCardDur = 2.5,
 
 module.exports = { PATH, SALON_SLUG, DEFAULT_SALON, AI_LABEL, AI_LABEL_ZONE, DURATION, TEMPLATES, ROLES, BLOCK, checkText, checkAll, BlockedError,
   cardStatus, selectable, stubSeed, cardView, preselect, newAvatar, advanceStub, draftPrompt, cleanDraft, mockDraft, cleanApproval, estimateDuration,
-  buildTwinAss, stubTimeline, stubFfmpegArgs, musicFor, COLORS, twinAssembleArgs, twinTotal, MUSIC_UNDER_SPEECH_DB, DEFAULT_OVERLAYS, cleanOverlays, TWIN_BRAND_ZONE, BRAND_PILL, brandPill, pillPath, PRODUCT_META, BROLL_PROMPTS, PROMO_FADE, stillArgs, promoTimeline, promoAssembleArgs, PRODUCT_ON_SURFACE, END_CARD };
+  buildTwinAss, stubTimeline, stubFfmpegArgs, musicFor, COLORS, twinAssembleArgs, twinTotal, MUSIC_UNDER_SPEECH_DB, DEFAULT_OVERLAYS, cleanOverlays, TWIN_BRAND_ZONE, BRAND_PILL, brandPill, pillPath, PRODUCT_META, BROLL_PROMPTS, PROMO_FADE, promoTimeline, promoAssembleArgs, PRODUCT_ON_SURFACE, END_CARD };

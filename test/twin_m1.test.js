@@ -58,9 +58,10 @@ test('My Reels badges: Hair Reveal vs AI Twin (+ template, + AI)', () => {
 });
 
 // ---------- flag on ----------
-async function twinApp() {
+// M1 tests exercise own-twin creation, which in production stays behind ENABLE_TWIN_CREATION=1 (see twin_golive.test.js)
+async function twinApp(env = { ENABLE_TWIN_CREATION: '1' }) {
   const slug = 'test-' + id(), app = express(); app.use(express.json()); app.use(RA.staticGuard({ ENABLE_AI_TWIN: '1' })); app.use(express.static(path.join(ROOT, 'public')));
-  require('../routes_studio')({ app, ...deps }); RA({ app, ...deps, slug, trainMs: 0 });
+  require('../routes_studio')({ app, ...deps }); RA({ app, ...deps, slug, trainMs: 0, env });
   return { slug, ...(await serve(app)) };
 }
 test('flag on: config + stub library seed (ready / training / Sample) + preselect', async () => {

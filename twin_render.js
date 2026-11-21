@@ -30,14 +30,14 @@ async function runwayClip({ rw, still, prompt, duration = 5, dest, rwOpts = {}, 
   await rw.download(t.output[0], dest, rwOpts);
   return { file: dest, task_id: c.task_id, model: c.model, estimate: c.estimate, cost_credits: t.cost ?? null, reused: false };
 }
-// M3 Promo: avatar -> B-roll (style a: clean surface + real product photo composited; optional style b) -> product end card.
-// promo = { productFile, styleAStill, styleBStill?, includeB?, clipSeconds?, endCardDur? }
+// M3 Promo (production): avatar -> ONE clean-surface B-roll clip (people-free countertop push-in) -> product photo end card.
+// The product is shown on the end card only; compositing it onto the moving clip is opt-in (compositeProduct) because it is
+// not tracked automatically. Clips of the presenter holding a product are never generated (the model would invent the product).
+// promo = { productFile, styleAStill, clipSeconds?, endCardDur?, compositeProduct?, surfaceA? }
 async function buildPromoBroll(promo, { rw, dir, rwOpts = {}, log = () => {} }) {
-  const dur = promo.clipSeconds || 5, out = [];
+  const dur = promo.clipSeconds || 5;
   const a = await runwayClip({ rw, still: promo.styleAStill, prompt: A.BROLL_PROMPTS.a, duration: dur, dest: path.join(dir, 'broll_a.mp4'), rwOpts, log });
-  out.push({ ...a, style: 'a', dur, composite: true, surface: promo.surfaceA || null });
-  if (promo.includeB && promo.styleBStill) { const b = await runwayClip({ rw, still: promo.styleBStill, prompt: A.BROLL_PROMPTS.b, duration: dur, dest: path.join(dir, 'broll_b.mp4'), rwOpts, log }); out.push({ ...b, style: 'b', dur, composite: false }); }
-  return out;
+  return [{ ...a, style: 'a', dur, composite: promo.compositeProduct === true, surface: promo.surfaceA || null }];
 }
 
 async function renderHeygen(p, { hg, run, probeDuration, master, dir, musicOn = p.musicOn, env = process.env, hgOpts = {}, log = () => {}, rw = null, promo = null, rwOpts = {} }) {
