@@ -299,12 +299,17 @@ const musicFor = (track, musicOn) => (musicOn === false || !track || track === '
 const MUSIC_UNDER_SPEECH_DB = -20;
 // metadata stored with the salon's product photo: kept for future B-roll (M3, Runway), never rendered on the avatar
 const PRODUCT_META = Object.freeze({ use: 'broll', milestone: 'M3', provider: 'runway', render_in_avatar: false, status: 'stored_for_broll' });
-function twinAssembleArgs({ talking, total, assPath, musicFile, musicStart = 0, out, fontsdir = '/usr/share/fonts/truetype/dejavu', ffEsc = s => s.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'") }) {
+function twinAssembleArgs({ talking, total, assPath, musicFile, musicStart = 0, out, pushIn = 0, fontsdir = '/usr/share/fonts/truetype/dejavu', ffEsc = s => s.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'") }) {
   if (!talking) throw new Error('talking-head file is required');
   const T = (+total).toFixed(3);
   const args = ['-y', '-i', talking];
   let vi = 1;
-  let fc = '[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30[bg]'; let last = '[bg]';
+  const z = Number(pushIn) || 0;
+  // Default cover-crop is unchanged when pushIn is 0. When set (typically 0.03–0.05), slowly zoom in over the clip, biased toward the upper frame (face).
+  const cover = z > 0
+    ? `scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30,scale='1080*(1+${z}*t/${T})':'1920*(1+${z}*t/${T})':eval=frame,crop=1080:1920:'(iw-1080)/2':'(ih-1920)*0.25',setsar=1`
+    : 'scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30';
+  let fc = `[0:v]${cover}[bg]`; let last = '[bg]';
   fc += `;${last}subtitles='${ffEsc(assPath)}':fontsdir=${fontsdir},format=yuv420p[vout]`;
   fc += `;[0:a]aformat=sample_rates=44100:channel_layouts=stereo,apad,atrim=0:${T}[sp]`;
   if (musicFile) { args.push('-ss', String(musicStart), '-i', musicFile);

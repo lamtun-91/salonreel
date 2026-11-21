@@ -101,8 +101,31 @@ async function listVoices({ language = 'en', gender, limit = 20, ...o } = {}) {
   return ((await request('GET', `/v3/models/audio/voices?${q}`, o))?.data || []).map(v => ({ voice_id: v.voice_id, name: v.name, language: v.language, gender: v.gender }));
 }
 
+// Optional salon interior behind the stock avatar. Off unless TWIN_SALON_BACKGROUND=1.
+// HeyGen CreateVideoFromAvatar uses BackgroundSetting: { type: "image", url } or { type: "image", asset_id }
+// (not the studio-scene { type, source } shape). remove_background needs a matting-trained look or native alpha.
+const SALON_BG_PUBLIC_PATH = '/twin/salon_interior.jpg';
+const DEFAULT_PUSH_IN = 0.04; // 4% slow ffmpeg push-in over the clip (allowed range 3–5%, cap 8%)
+function salonBackgroundEnabled(env = process.env) { return env.TWIN_SALON_BACKGROUND === '1'; }
+function salonBackground(env = process.env) {
+  if (!salonBackgroundEnabled(env)) return null;
+  const asset_id = String(env.TWIN_SALON_BACKGROUND_ASSET_ID || '').trim();
+  if (asset_id) return { type: 'image', asset_id };
+  const explicit = String(env.TWIN_SALON_BACKGROUND_URL || '').trim();
+  const base = String(env.PUBLIC_BASE_URL || '').replace(/\/$/, '');
+  const url = explicit || (base ? base + SALON_BG_PUBLIC_PATH : '');
+  if (!/^https:\/\//i.test(url)) throw new HeyGenError('TWIN_SALON_BACKGROUND=1 needs a public HTTPS image URL (TWIN_SALON_BACKGROUND_URL or PUBLIC_BASE_URL).', { code: 'bad_request' });
+  return { type: 'image', url };
+}
+function pushInAmount(env = process.env) {
+  if (!salonBackgroundEnabled(env) || env.TWIN_SALON_PUSH_IN === '0') return 0;
+  const n = env.TWIN_SALON_PUSH_IN == null || env.TWIN_SALON_PUSH_IN === '' ? DEFAULT_PUSH_IN : Number(env.TWIN_SALON_PUSH_IN);
+  if (!Number.isFinite(n) || n < 0) return DEFAULT_PUSH_IN;
+  return Math.min(0.08, n);
+}
+
 // Build the POST /v3/videos body for a stock avatar speaking a script. No `test` field: v3 rejects unknown fields.
-function avatarVideoBody({ avatar_id, voice_id, script, engine = DEFAULT_ENGINE, title, aspect_ratio = '9:16', resolution = '1080p' }) {
+function avatarVideoBody({ avatar_id, voice_id, script, engine = DEFAULT_ENGINE, title, aspect_ratio = '9:16', resolution = '1080p', background, remove_background }) {
   if (!avatar_id) throw new HeyGenError('avatar_id is required', { code: 'bad_request' });
   if (!voice_id) throw new HeyGenError('voice_id is required', { code: 'bad_request' });
   const s = String(script || '').trim(); if (!s) throw new HeyGenError('script is required', { code: 'bad_request' });
@@ -110,16 +133,23 @@ function avatarVideoBody({ avatar_id, voice_id, script, engine = DEFAULT_ENGINE,
   const b = { type: 'avatar', avatar_id, voice_id, script: s, aspect_ratio, resolution, ...(title ? { title: String(title).slice(0, 100) } : {}) };
   if (!RATES_PER_MIN[engine]) throw new HeyGenError(`Unsupported HeyGen engine "${engine}"`, { code: 'bad_engine' });
   b.engine = { type: engine };
+  if (background) b.background = background;
+  if (remove_background) b.remove_background = true;
   return b;
 }
 async function createAvatarVideo(args, o = {}) {
   if (!spendAllowed(o, o.env)) throw new SpendBlockedError();
-  const engine = engineFor({ engine: args.engine }, o.env || process.env);
-  const body = avatarVideoBody({ ...args, engine });
+  const env = o.env || process.env;
+  const engine = engineFor({ engine: args.engine }, env);
+  const extra = {};
+  const bg = args.background !== undefined ? args.background : salonBackground(env);
+  if (bg) { extra.background = bg; extra.remove_background = args.remove_background !== false; }
+  else if (args.remove_background) extra.remove_background = true;
+  const body = avatarVideoBody({ ...args, ...extra, engine });
   const est = estimateCost({ script: body.script, engine, avatar_type: args.avatar_type });
   const log = o.log || (m => console.log(m));
   try { checkCost(est); } catch (e) { log(`[heygen] REFUSED engine=${engine} est_s=${est.seconds} est_usd=${est.usd.toFixed(4)}: ${e.message}`); throw e; }
-  log(`[heygen] create avatar=${body.avatar_id} engine=${engine} est_s=${est.seconds} est_usd=${est.usd.toFixed(4)} rate_per_min=${est.rate_per_min}`);
+  log(`[heygen] create avatar=${body.avatar_id} engine=${engine} est_s=${est.seconds} est_usd=${est.usd.toFixed(4)} rate_per_min=${est.rate_per_min}${body.remove_background ? ' salon_bg=1' : ''}`);
   const j = await request('POST', '/v3/videos', { ...o, body, idempotencyKey: o.idempotencyKey });
   const d = j?.data || {}; if (!d.video_id) throw new HeyGenError('HeyGen did not return a video_id', { code: 'bad_response' });
   return { video_id: d.video_id, status: d.status || 'pending', engine, estimate: est };
@@ -153,4 +183,4 @@ async function download(url, dest, { timeoutMs = 5 * 60e3, fetchImpl = globalThi
   return dest;
 }
 
-module.exports = { BASE, RATES_PER_MIN, DEFAULT_ENGINE, GUARD, estimateSeconds, engineFor, ratePerMin, estimateCost, checkCost, CostGuardError, HeyGenError, SpendBlockedError, key, spendAllowed, request, me, listPublicLooks, listVoices, avatarVideoBody, createAvatarVideo, getVideo, waitForVideo, download };
+module.exports = { BASE, RATES_PER_MIN, DEFAULT_ENGINE, GUARD, estimateSeconds, engineFor, ratePerMin, estimateCost, checkCost, CostGuardError, HeyGenError, SpendBlockedError, key, spendAllowed, request, me, listPublicLooks, listVoices, SALON_BG_PUBLIC_PATH, DEFAULT_PUSH_IN, salonBackgroundEnabled, salonBackground, pushInAmount, avatarVideoBody, createAvatarVideo, getVideo, waitForVideo, download };

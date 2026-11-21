@@ -6,6 +6,7 @@
 // A stored raw clip is reused on re-render / export variants so captions or music edits never pay for a second HeyGen render.
 const fs = require('fs'), path = require('path');
 const A = require('./avatar');
+const C = require('./heygen_client');
 
 // Scale caption timings from the planned length to the real HeyGen clip length.
 function retimeCaptions(captions = [], planned, actual) {
@@ -46,7 +47,7 @@ async function renderHeygen(p, { hg, run, probeDuration, master, dir, musicOn = 
   let hgInfo = p.heygen && p.heygen.video_id && fs.existsSync(raw) ? p.heygen : null;
   if (!hgInfo) {
     const ids = heygenIds(p, hg, env);
-    const c = await hg.createVideo({ ...ids, script: p.script.text, engine: hg.engine(), aspect_ratio: '9:16', title: `SalonReel twin ${p.id}` }, hgOpts);
+    const c = await hg.createVideo({ ...ids, script: p.script.text, engine: hg.engine(), aspect_ratio: '9:16', title: `SalonReel twin ${p.id}` }, { ...hgOpts, env: hgOpts.env || env });
     log({ created: c.video_id });
     const v = await hg.waitForVideo(c.video_id, { ...hgOpts, onPoll: x => log({ poll: x.status }) });
     await hg.download(v.video_url, raw, hgOpts);
@@ -69,7 +70,7 @@ async function renderHeygen(p, { hg, run, probeDuration, master, dir, musicOn = 
     // captions belong to the avatar segment; rewrite the ASS so overlays (if toggled on) span the full promo
     fs.writeFileSync(assPath, A.buildTwinAss({ lines: captions, salon: p.profile.salon, duration: timeline.total, tone: p.inputs?.mood === 'Luxe' ? 'luxe' : 'clean', solidCaptions: true, overlays: A.cleanOverlays(p.overlays) }));
     await run('ffmpeg', built.args);
-  } else await run('ffmpeg', A.twinAssembleArgs({ talking: raw, total, assPath, musicFile, out }));
+  } else await run('ffmpeg', A.twinAssembleArgs({ talking: raw, total, assPath, musicFile, out, pushIn: C.pushInAmount(hgOpts.env || env) }));
   // speech is always present, so master both variants
   const loudness = await master(out).catch(e => ({ error: String(e.message).slice(0, 200) }));
   return { out, raw, heygen: hgInfo, duration: timeline ? timeline.total : total, timeline, broll: brolls && brolls.map(b => ({ style: b.style, task_id: b.task_id || null, reused: b.reused, model: b.model || null, estimate: b.estimate || null })), captions, product_for_broll: p.product?.key || null, music: !!musicFile, track: musicFile ? p.inputs.music : 'none', loudness, overlays: A.cleanOverlays(p.overlays), ai_label: A.cleanOverlays(p.overlays).ai_label ? A.AI_LABEL : null };
