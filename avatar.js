@@ -145,8 +145,10 @@ const AI_LABEL_ZONE = { x: 70, topY: 372, size: 34 };
 function assTime(t) { const h = Math.floor(t / 3600), m = Math.floor(t / 60) % 60, s = (t % 60).toFixed(2).padStart(5, '0'); return `${h}:${String(m).padStart(2, '0')}:${s}`; }
 const assEsc = s => String(s).replace(/[{}\\]/g, '').replace(/\n/g, '\\N');
 // wraps pipeline.buildAss (unchanged) with an always-on AI label and optional stub slate text
-function buildTwinAss({ lines, salon, duration, tone, slates = [] }) {
+function buildTwinAss({ lines, salon, duration, tone, slates = [], solidCaptions = false }) {
   let a = P.buildAss({ lines, salon, duration, tone });
+  // live avatar footage is often a bright studio backdrop: make the caption box near-opaque so white text stays legible
+  if (solidCaptions) a = a.replace(/(\nStyle: Cap,[^\n]*?)&H50000000,&H50000000/, '$1&H20000000,&H20000000');
   const styles = `Style: AILabel,DejaVu Sans,${AI_LABEL_ZONE.size},&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,1,0,0,0,100,100,1,0,3,8,0,7,${AI_LABEL_ZONE.x},60,${AI_LABEL_ZONE.topY},1
 Style: Slate,DejaVu Sans,44,&H00F3E3E7,&H00F3E3E7,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,5,120,120,0,1`;
   a = a.replace(/(\nStyle: Brand[^\n]*)/, `$1\n${styles}`);
@@ -187,6 +189,8 @@ const musicFor = (track, musicOn) => (musicOn === false || !track || track === '
 // photo on a white card in its window, ASS (brand + captions + always-on AI label), HeyGen speech kept with the music
 // bed ducked underneath (or speech only when music is off).
 const MUSIC_UNDER_SPEECH_DB = -20;
+// product card sits below the caption box (P.CAPTION_ZONE bottom 1230) so it never covers the presenter's face
+const PRODUCT_CARD = { w: 360, h: 380, y: 1262 };
 function twinAssembleArgs({ talking, total, assPath, productFile, product, musicFile, musicStart = 0, out, fontsdir = '/usr/share/fonts/truetype/dejavu', ffEsc = s => s.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'") }) {
   if (!talking) throw new Error('talking-head file is required');
   const T = (+total).toFixed(3);
@@ -194,7 +198,7 @@ function twinAssembleArgs({ talking, total, assPath, productFile, product, music
   let vi = 1;
   let fc = '[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30[bg]'; let last = '[bg]';
   if (productFile && product) { args.push('-loop', '1', '-t', T, '-i', productFile);
-    fc += `;[${vi}:v]scale=600:540:force_original_aspect_ratio=decrease,pad=iw+32:ih+32:16:16:color=white,format=rgba[pr];${last}[pr]overlay=(W-w)/2:470:enable='between(t,${product.slot_start_s},${product.slot_end_s})'[bp]`; last = '[bp]'; vi++; }
+    fc += `;[${vi}:v]scale=${PRODUCT_CARD.w}:${PRODUCT_CARD.h}:force_original_aspect_ratio=decrease,pad=iw+24:ih+24:12:12:color=white,format=rgba[pr];${last}[pr]overlay=(W-w)/2:${PRODUCT_CARD.y}:enable='between(t,${product.slot_start_s},${product.slot_end_s})'[bp]`; last = '[bp]'; vi++; }
   fc += `;${last}subtitles='${ffEsc(assPath)}':fontsdir=${fontsdir},format=yuv420p[vout]`;
   fc += `;[0:a]aformat=sample_rates=44100:channel_layouts=stereo,apad,atrim=0:${T}[sp]`;
   if (musicFile) { args.push('-ss', String(musicStart), '-i', musicFile);
@@ -209,4 +213,4 @@ const twinTotal = (clipDuration, cap = DURATION.max) => r2(Math.max(1, Math.min(
 
 module.exports = { PATH, SALON_SLUG, DEFAULT_SALON, AI_LABEL, AI_LABEL_ZONE, DURATION, TEMPLATES, ROLES, BLOCK, checkText, checkAll, BlockedError,
   cardStatus, selectable, stubSeed, cardView, preselect, newAvatar, advanceStub, draftPrompt, cleanDraft, mockDraft, cleanApproval, estimateDuration,
-  buildTwinAss, stubTimeline, stubFfmpegArgs, musicFor, COLORS, twinAssembleArgs, twinTotal, MUSIC_UNDER_SPEECH_DB };
+  buildTwinAss, stubTimeline, stubFfmpegArgs, musicFor, COLORS, twinAssembleArgs, twinTotal, MUSIC_UNDER_SPEECH_DB, PRODUCT_CARD };

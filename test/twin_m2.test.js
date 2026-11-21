@@ -102,6 +102,8 @@ test('m2: twinAssembleArgs crops to 1080x1920, keeps speech, ducks music, overla
   assert.match(fc, new RegExp(`volume=${A.MUSIC_UNDER_SPEECH_DB}dB`)); assert.match(fc, /amix=inputs=2:duration=first/);
   const b = A.twinAssembleArgs({ talking: 'raw.mp4', total: 20, assPath: '/tmp/x.ass', out: 'o.mp4' });
   assert.doesNotMatch(b[b.indexOf('-filter_complex') + 1], /amix|overlay/);
+  assert.match(fc, new RegExp(`overlay=\\(W-w\\)/2:${A.PRODUCT_CARD.y}`)); assert.ok(A.PRODUCT_CARD.y > 1230, 'product card must sit below the caption zone');
+  assert.match(A.buildTwinAss({ lines: [{ start_s: 0, end_s: 1, text: 'x' }], salon: 'Olya Atelier', duration: 2, solidCaptions: true }), /Style: Cap,[^\n]*&H20000000,&H20000000/);
   assert.equal(A.twinTotal(52), A.DURATION.max); assert.equal(A.twinTotal(21.37), 21.37);
 });
 

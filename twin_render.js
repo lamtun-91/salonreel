@@ -38,7 +38,7 @@ async function renderHeygen(p, { hg, run, probeDuration, master, dir, getProduct
   let product = null;
   if (p.product?.key) { const k = total / planned; product = { slot_start_s: Math.round(p.product.slot_start_s * k * 100) / 100, slot_end_s: Math.round(Math.min(total, p.product.slot_end_s * k) * 100) / 100 }; }
   const assPath = path.join(dir, 'twin_live.ass');
-  fs.writeFileSync(assPath, A.buildTwinAss({ lines: captions, salon: p.profile.salon, duration: total, tone: p.inputs?.mood === 'Luxe' ? 'luxe' : 'clean' }));
+  fs.writeFileSync(assPath, A.buildTwinAss({ lines: captions, salon: p.profile.salon, duration: total, tone: p.inputs?.mood === 'Luxe' ? 'luxe' : 'clean', solidCaptions: true }));
   const productFile = product ? await getProduct(p.product.key, dir) : null;
   const musicFile = A.musicFor(p.inputs?.music, musicOn);
   const out = path.join(dir, `twin_live_${Date.now()}${musicFile ? '' : '_nomusic'}.mp4`);
