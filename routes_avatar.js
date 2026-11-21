@@ -5,7 +5,7 @@
 const fs = require('fs'), path = require('path');
 const st = require('./storage'), A = require('./avatar'), MASTER = require('./master'), MUSIC = require('./music');
 const HG = require('./heygen'), RW = require('./runway'), S = require('./studio'), TR = require('./twin_render');
-const HGC = require('./heygen_client'), RWC = require('./runway_client'), SP = require('./spend');
+const HGC = require('./heygen_client'), RWC = require('./runway_client'), SP = require('./spend'), PB = require('./promo_broll');
 
 const TWIN_CONSENT = 'I am the person in this AI twin, or I have their permission, and I will turn on Instagram\'s AI info label when I post.';
 const IG_AI_REMINDER = 'When you post this Reel, turn on Instagram\'s "AI info" label (Advanced settings → AI label) - this video was made with AI.';
@@ -56,7 +56,8 @@ function mount({ app, llm, parseJSON, run, cfg, TRACKS, D, id, wrap, slug = A.SA
   app.get('/api/twin/config', (q, s) => s.json({ enabled: true, stub: !hg.configured(), twinCreation: creationEnabled(env), templates: A.TEMPLATES, defaultSalon: A.DEFAULT_SALON, moods: S.MOODS,
     tracks: Object.entries(TRACKS).map(([k, v]) => ({ id: k, label: v.label, name: v.name, moodLabel: v.moodLabel, bpm: v.bpm })), defaultTrack: MUSIC.DEFAULT,
     heygenTest: HG.testMode(), heygenTestNote: HG.TEST_MODE_NOTE, heygenConfigured: hg.configured(), runwayConfigured: rw.configured(), llmLive: live(), consent: TWIN_CONSENT, igAiLabelReminder: IG_AI_REMINDER,
-    aiLabel: A.AI_LABEL, defaultOverlays: A.DEFAULT_OVERLAYS, duration: A.DURATION, poweredBy: { name: 'Runway', text: 'Powered by Runway', url: 'https://runwayml.com' } }));
+    aiLabel: A.AI_LABEL, defaultOverlays: A.DEFAULT_OVERLAYS, duration: A.DURATION, poweredBy: { name: 'Runway', text: 'Powered by Runway', url: 'https://runwayml.com' },
+    promoBrollMode: PB.enabled(env) ? 'contextual' : 'off' }));
 
   app.get('/api/twin/avatars', w(async (q, s) => s.json(await listCards())));
   app.post('/api/twin/avatars/upload-url', w(async (q, s) => { // stub: a real signed PUT for the training clip, nothing is sent to HeyGen in M1
@@ -147,19 +148,30 @@ function mount({ app, llm, parseJSON, run, cfg, TRACKS, D, id, wrap, slug = A.SA
   app.post('/api/twin/projects/:id/product', w(async (q, s) => { const p = await load(q.params.id), key = String(q.body.key || ''), mime = String(q.body.mime || '');
     if (!key.startsWith(`projects/${p.id}/product/`) || !PRODUCT_TYPES[mime]) throw err(400, 'bad product key'); st.safeKey(key);
     if (!(await st.exists(key))) throw err(400, 'Upload the photo first');
-    p.product = { key, mime, ...A.PRODUCT_META, uploaded_at: new Date().toISOString() };
-    await st.putJSON(`${key}.meta.json`, { project_id: p.id, template: p.template, salon: p.profile.salon, key, mime, ...A.PRODUCT_META, uploaded_at: p.product.uploaded_at });
+    const name = String(q.body.name || '').trim().slice(0, 80) || null;
+    const typeHint = String(q.body.type || '').trim();
+    // Infer only when the contextual flag is on and type/name did not already resolve; at most one cheap llm call. Flag off: store fields, no inference call.
+    const inferred = PB.enabled(env)
+      ? await PB.inferType({ name, type: typeHint }, { llm: live() ? llm : null, maxCalls: 1 })
+      : { type: PB.typeFromMeta({ name, type: typeHint }), source: PB.typeFromMeta({ name, type: typeHint }) ? 'meta' : null, calls: 0 };
+    p.product = { key, mime, ...A.PRODUCT_META, name, type: inferred.type || null, type_source: inferred.source || null, uploaded_at: new Date().toISOString() };
+    await st.putJSON(`${key}.meta.json`, { project_id: p.id, template: p.template, salon: p.profile.salon, key, mime, name: p.product.name, type: p.product.type, type_source: p.product.type_source, ...A.PRODUCT_META, uploaded_at: p.product.uploaded_at });
     await save(p); s.json(await view(p)); }));
   app.delete('/api/twin/projects/:id/product', w(async (q, s) => { const p = await load(q.params.id); p.product = null; await save(p); s.json(await view(p)); }));
 
   // draft: script + captions + B-roll plan (+ product slot). LLM when configured, otherwise the deterministic mock.
   app.post('/api/twin/projects/:id/draft', job('draft', async p => { const chk = A.checkText(p.inputs.prompt, 'prompt'); if (!chk.ok) throw new A.BlockedError(chk); }, async p => {
     const ctx = { template: p.template, prompt: p.inputs.prompt, mood: p.inputs.mood, language: p.inputs.language, salon: p.profile.salon, avatar: p.avatar, hasProduct: false }; // product photo is for M3 B-roll, not the avatar script
+    if (PB.enabled(env) && p.product) { ctx.productType = p.product.type; ctx.productName = p.product.name; }
     let d;
     if (live()) { try { d = await A.writeAiDraft(ctx, llm, parseJSON); }
       catch (e) { console.error('twin draft AI failed, using template draft:', e.message); d = null; } }
     if (!d) { d = A.mockDraft(ctx); d.mode = 'template'; }
     p.script = { ...d.script, approved: false, approved_at: null, approved_by: null, mode: d.mode }; p.broll = d.broll; p.copy = d.copy; p.total_s = d.total_s;
+    if (PB.enabled(env) && p.product) {
+      const llmBeats = (d.broll?.clips || []).map(c => { const prompt = PB.cleanBeatPrompt(c.prompt); return prompt ? { ...c, prompt } : null; }).filter(Boolean).slice(0, PB.MAX_CLIPS);
+      p.broll = { clips: llmBeats.length ? llmBeats : PB.beatsFor({ type: p.product.type, name: p.product.name, script: d.script.text }) };
+    }
     p.status = 'awaiting_approval'; await save(p);
   }));
   app.post('/api/twin/projects/:id/approve', w(async (q, s) => {
@@ -172,7 +184,7 @@ function mount({ app, llm, parseJSON, run, cfg, TRACKS, D, id, wrap, slug = A.SA
   // ---------- M2 live render (HeyGen Sample avatar) - only when HEYGEN_API_KEY + HEYGEN_LIVE=1; spend additionally needs HEYGEN_ALLOW_SPEND=1 ----------
   const probeDuration = async f => { const o = await run('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', f]); return +String(o?.stdout ?? o).trim(); };
   // Paid clips are stored next to the project (projects/<id>/raw/) so re-edits after a restart reuse them for $0.
-  const CLIPS = { heygen: 'heygen_raw.mp4', runway: 'broll_a.mp4' };
+  const CLIPS = { heygen: 'heygen_raw.mp4', runway: 'broll_a.mp4', runway2: 'broll_b.mp4' };
   const clipKey = (p, name) => `projects/${p.id}/raw/${name}`;
   async function restoreClips(p, dir) {
     fs.mkdirSync(dir, { recursive: true });
@@ -186,7 +198,11 @@ function mount({ app, llm, parseJSON, run, cfg, TRACKS, D, id, wrap, slug = A.SA
     const have = async name => fs.existsSync(path.join(dir, name)) || await st.exists(clipKey(p, name)).catch(() => false);
     const items = [];
     if (!(p.heygen?.video_id && await have(CLIPS.heygen))) { const engine = hg.engine(); items.push({ provider: 'heygen', engine, est_usd: HGC.estimateCost({ script: p.script.text, engine }).usd }); }
-    if (wantsPromoBroll(p) && !(await have(CLIPS.runway))) { const model = RWC.modelFor({}, env); items.push({ provider: 'runway', engine: model, est_usd: RWC.estimateCost({ model, duration: 5 }).usd }); }
+    if (wantsPromoBroll(p)) {
+      const model = RWC.modelFor({}, env), est = RWC.estimateCost({ model, duration: 5 }).usd;
+      const names = PB.enabled(env) ? PB.CLIP_NAMES.slice(0, PB.plannedClipCount(p, env)) : [CLIPS.runway];
+      for (const name of names) if (!(await have(name))) items.push({ provider: 'runway', engine: model, est_usd: est });
+    }
     return items;
   }
   async function renderLive(p, { musicOn = p.musicOn, ip = 'unknown', reservation = null } = {}) {
@@ -206,7 +222,10 @@ function mount({ app, llm, parseJSON, run, cfg, TRACKS, D, id, wrap, slug = A.SA
     let promo = null;
     if (wantsPromoBroll(p)) {
       const productFile = await st.getFile(p.product.key, path.join(dir, 'product' + path.extname(p.product.key)));
-      promo = { productFile, styleAStill: path.join(__dirname, 'assets', 'broll_countertop.jpg'), compositeProduct: false };
+      promo = { productFile, styleAStill: path.join(__dirname, 'assets', 'broll_countertop.jpg'), compositeProduct: false,
+        type: p.product.type, name: p.product.name, script: p.script?.text,
+        beats: PB.enabled(env) ? (p.broll?.clips || []).slice(0, PB.MAX_CLIPS) : undefined,
+        buildClips: PB.enabled(env) ? PB.buildClips : undefined };
     }
     let r;
     try { r = await renderHeygen(p, { hg: hgW, run, probeDuration, master: MASTER.masterFile, dir, musicOn, rw: promo ? rwW : null, promo }); }

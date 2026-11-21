@@ -88,14 +88,17 @@ function advanceStub(a, now = Date.now()) {
 }
 
 // ---------- draft (script + captions + B-roll plan + product slot) ----------
-function draftPrompt({ template, prompt, mood, language, salon, avatar, hasProduct }) {
+function draftPrompt({ template, prompt, mood, language, salon, avatar, hasProduct, productType, productName }) {
   const t = TEMPLATES.find(x => x.id === template) || TEMPLATES[0];
+  const contextual = require('./promo_broll').draftBrollSchema({ productType, productName });
+  const brollEx = contextual ? contextual.jsonExample : '{"prompt":"generic salon atmosphere or process shot (station, dryer, foam, tools, interior) - no people\'s faces, no finished hairstyle","start_s":n,"end_s":n}';
+  const brollRules = contextual ? contextual.rules : 'Rules: 1-3 B-roll beats of 3-5s each.';
   return `You write short talking-head Reels for a hair salon called ${salon}. Template: ${t.name} (${t.blurb}). Brief: ${prompt || t.example}
 Speaker: the salon's AI twin "${avatar?.name || 'host'}" (${avatar?.role || 'host'}), speaking to camera. Mood: ${mood}. Language: ${language}.
 Return JSON only: {"script":"spoken words, about ${DURATION.words} words (~${DURATION.target}s at a natural pace; at least ${DURATION.minWords}, never over ${DURATION.maxWords} words)","captions":[{"start_s":n,"end_s":n,"text":"short on-screen line"}],
-"broll":[{"prompt":"generic salon atmosphere or process shot (station, dryer, foam, tools, interior) - no people's faces, no finished hairstyle","start_s":n,"end_s":n}],
+"broll":[${brollEx}],
 "product":${hasProduct ? '{"start_s":n,"end_s":n} (when the salon\'s real product photo is shown)' : 'null'},"caption":"Instagram caption","hashtags":["..."]}
-Rules: 1-3 B-roll beats of 3-5s each. Captions in order, 1-4s each, punchy, no emoji. Never describe a hair result, a before/after, a client's hair, medical claims, celebrities or minors. End with a booking CTA.`;
+${brollRules} Captions in order, 1-4s each, punchy, no emoji. Never describe a hair result, a before/after, a client's hair, medical claims, celebrities or minors. End with a booking CTA.`;
 }
 const r2 = x => Math.round(x * 100) / 100;
 const clamp = (x, a, b) => Math.min(b, Math.max(a, +x || 0));

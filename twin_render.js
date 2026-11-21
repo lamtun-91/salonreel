@@ -36,6 +36,8 @@ async function runwayClip({ rw, still, prompt, duration = 5, dest, rwOpts = {}, 
 // not tracked automatically. Clips of the presenter holding a product are never generated (the model would invent the product).
 // promo = { productFile, styleAStill, clipSeconds?, endCardDur?, compositeProduct?, surfaceA? }
 async function buildPromoBroll(promo, { rw, dir, rwOpts = {}, log = () => {} }) {
+  // M3.1 hook: contextual product B-roll lives in promo_broll.js and is only used when the caller sets buildClips (flag off = this path).
+  if (typeof promo?.buildClips === 'function') return promo.buildClips(promo, { rw, dir, rwOpts, log, runwayClip });
   const dur = promo.clipSeconds || 5;
   const a = await runwayClip({ rw, still: promo.styleAStill, prompt: A.BROLL_PROMPTS.a, duration: dur, dest: path.join(dir, 'broll_a.mp4'), rwOpts, log });
   return [{ ...a, style: 'a', dur, composite: promo.compositeProduct === true, surface: promo.surfaceA || null }];
