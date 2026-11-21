@@ -35,7 +35,7 @@ async function runwayClip({ rw, still, prompt, duration = 5, dest, rwOpts = {}, 
 async function buildPromoBroll(promo, { rw, dir, rwOpts = {}, log = () => {} }) {
   const dur = promo.clipSeconds || 5, out = [];
   const a = await runwayClip({ rw, still: promo.styleAStill, prompt: A.BROLL_PROMPTS.a, duration: dur, dest: path.join(dir, 'broll_a.mp4'), rwOpts, log });
-  out.push({ ...a, style: 'a', dur, composite: true });
+  out.push({ ...a, style: 'a', dur, composite: true, surface: promo.surfaceA || null });
   if (promo.includeB && promo.styleBStill) { const b = await runwayClip({ rw, still: promo.styleBStill, prompt: A.BROLL_PROMPTS.b, duration: dur, dest: path.join(dir, 'broll_b.mp4'), rwOpts, log }); out.push({ ...b, style: 'b', dur, composite: false }); }
   return out;
 }

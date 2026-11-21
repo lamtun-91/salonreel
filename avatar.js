@@ -271,7 +271,8 @@ function promoAssembleArgs({ avatar, brolls = [], productFile, endCardDur = 2.5,
   brolls.forEach((b, i) => { args.push('-i', b.file); const bi = vi++;
     fc += `;[${bi}:v]trim=0:${b.dur},setpts=PTS-STARTPTS,${N()}[br${i}]`;
     if (b.composite) { args.push('-loop', '1', '-t', String(b.dur), '-i', productFile); const pi = vi++; const at = Math.max(0, b.dur - (b.compositeLast || 2.2)).toFixed(2);
-      fc += `;[${pi}:v]scale=${PRODUCT_ON_SURFACE.w}:${PRODUCT_ON_SURFACE.h}:force_original_aspect_ratio=decrease,format=rgba,fade=t=in:st=${at}:d=${PRODUCT_ON_SURFACE.fadeIn}:alpha=1[pc${i}];[br${i}][pc${i}]overlay=(W-w)/2:${PRODUCT_ON_SURFACE.y}-h/2:enable='gte(t,${at})',format=yuv420p[s${i + 1}]`; }
+      const S = { ...PRODUCT_ON_SURFACE, ...(b.surface || {}) }; // per-clip override when the empty spot lands elsewhere
+      fc += `;[${pi}:v]scale=${S.w}:${S.h}:force_original_aspect_ratio=decrease,format=rgba,fade=t=in:st=${at}:d=${S.fadeIn}:alpha=1[pc${i}];[br${i}][pc${i}]overlay=${S.x != null ? `${S.x}-w/2` : '(W-w)/2'}:${S.y}-h/2:enable='gte(t,${at})',format=yuv420p[s${i + 1}]`; }
     else fc += `;[br${i}]null[s${i + 1}]`; });
   args.push('-f', 'lavfi', '-t', String(endCardDur), '-i', `color=c=${END_CARD.bg}:s=1080x1920:r=30`); const bgi = vi++;
   args.push('-loop', '1', '-t', String(endCardDur), '-i', productFile); const ei = vi++;
