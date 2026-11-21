@@ -76,7 +76,7 @@ const readCaps = (box, src) => src.map((c, i) => { const g = k => box.querySelec
 function drawDraft() { if (!P?.script) return; $('script').value = P.script.text; $('durPill').textContent = `~${Math.round(P.total_s)}s`; $('durPill').className = 'pill ok';
   $('draftStat').textContent = (P.script.approved ? 'Approved. ' : 'Nothing is rendered until you approve. ') + (P.script.mode == 'template' ? 'Draft written from the template.' : '');
   $('caps').innerHTML = P.script.captions.map((c, i) => capRow(c, i, 'c')).join('');
-  $('broll').innerHTML = P.broll.clips.map((b, i) => `<div class="broll"><b>${b.start_s}s – ${b.end_s}s</b> · salon atmosphere, no faces or hair results<textarea data-i="${i}" rows="2">${esc(b.prompt)}</textarea></div>`).join('') || '<p class="s">No B-roll.</p>';
+  $('broll').innerHTML = P.broll.clips.map((b, i) => `<div class="broll"><b>${b.start_s}s – ${b.end_s}s</b> · salon atmosphere, no hair results<textarea data-i="${i}" rows="2">${esc(b.prompt)}</textarea></div>`).join('') || '<p class="s">No B-roll.</p>';
   $('prodSlot').innerHTML = P.product ? `<div class="broll"><b>Product photo</b> saved for upcoming product B-roll (your real photo, not AI). Not shown in this Reel.</div>` : '';
   $('approve').checked = false; $('approveBtn').disabled = true; }
 $('approve').onchange = () => $('approveBtn').disabled = !$('approve').checked;

@@ -32,8 +32,6 @@ const SURFACE = path.join(__dirname, 'assets', 'broll_countertop.jpg');
 const IN_USE_SURFACE = path.join(__dirname, 'assets', 'broll_in_use.jpg');
 // Placement on the 720x1280 marble countertop: base sits on the slab (~y=960), not off the front edge.
 const COMPOSE = Object.freeze({ width: 720, height: 1280, maxW: 360, maxH: 500, baseY: 960, shadowAlpha: 0.45, shadowBlur: 12 });
-// In-use still: smaller product at the lower-left marble edge, so hair lengths and hands stay the focus.
-const IN_USE_COMPOSE = Object.freeze({ width: 720, height: 1280, maxW: 160, maxH: 280, x: 40, baseY: 1000, shadowAlpha: 0.45, shadowBlur: 12 });
 
 const TYPE_RE = new RegExp('\\b(' + Object.keys(ALIASES).sort((a, b) => b.length - a.length).map(s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')\\b', 'i');
 
@@ -72,53 +70,53 @@ const STILL = 'The product stays upright and stationary on the marble counter, l
 function productBeat(detail) {
   return `The camera eases forward as soft window light drifts across ${detail} standing upright on a marble salon counter. ${STILL}`;
 }
-function inUseBeat(action, vessel) {
-  return `The camera holds as a stylist's hands ${action}, framed on the hair lengths and the back or side of the head. ${vessel} remains upright at the edge of the frame on the counter, label sharp.`;
+function inUseBeat(action) {
+  return `The camera holds as a stylist's hands ${action}.`;
 }
 const BEATS = Object.freeze({
   serum: [
     productBeat('a pump serum bottle'),
-    inUseBeat('smooth a drop of serum through the mid-lengths of a seated customer\'s hair', 'The pump bottle'),
+    inUseBeat('smooth a drop of serum through the mid-lengths of a seated customer\'s hair'),
   ],
   mask: [
     productBeat('a cream hair-mask jar'),
-    inUseBeat('work a cream mask through the mid-lengths of a seated customer\'s hair', 'The jar'),
+    inUseBeat('work a cream mask through the mid-lengths of a seated customer\'s hair'),
   ],
   spray: [
     productBeat('a spray bottle'),
-    inUseBeat('mist the mid-lengths of a seated customer\'s hair', 'The spray bottle'),
+    inUseBeat('mist the mid-lengths of a seated customer\'s hair'),
   ],
   oil: [
     productBeat('a dropper oil bottle'),
-    inUseBeat('smooth a drop of oil through the mid-lengths of a seated customer\'s hair', 'The bottle'),
+    inUseBeat('smooth a drop of oil through the mid-lengths of a seated customer\'s hair'),
   ],
   shampoo: [
     productBeat('a shampoo bottle'),
-    inUseBeat('work a lather through the hair lengths of a seated customer', 'The bottle'),
+    inUseBeat('work a lather through the hair lengths of a seated customer'),
   ],
   'styling cream': [
     productBeat('a styling-cream jar or tube'),
-    inUseBeat('smooth styling cream through the mid-lengths of a seated customer\'s hair', 'The jar'),
+    inUseBeat('smooth styling cream through the mid-lengths of a seated customer\'s hair'),
   ],
   conditioner: [
     productBeat('a conditioner bottle'),
-    inUseBeat('smooth conditioner through the mid-lengths of a seated customer\'s hair', 'The bottle'),
+    inUseBeat('smooth conditioner through the mid-lengths of a seated customer\'s hair'),
   ],
   'leave-in': [
     productBeat('a leave-in bottle'),
-    inUseBeat('smooth leave-in care through the mid-lengths of a seated customer\'s hair', 'The bottle'),
+    inUseBeat('smooth leave-in care through the mid-lengths of a seated customer\'s hair'),
   ],
   gloss: [
     productBeat('a gloss bottle'),
-    inUseBeat('smooth a gloss through the mid-lengths of a seated customer\'s hair', 'The bottle'),
+    inUseBeat('smooth a gloss through the mid-lengths of a seated customer\'s hair'),
   ],
   treatment: [
     productBeat('a treatment bottle'),
-    inUseBeat('smooth a treatment through the mid-lengths of a seated customer\'s hair', 'The bottle'),
+    inUseBeat('smooth a treatment through the mid-lengths of a seated customer\'s hair'),
   ],
   generic: [
     productBeat('a hair-care bottle or jar'),
-    inUseBeat('smooth the product through the mid-lengths of a seated customer\'s hair', 'The bottle or jar'),
+    inUseBeat('smooth the product through the mid-lengths of a seated customer\'s hair'),
   ],
 });
 
@@ -171,7 +169,7 @@ const PROMPT_SYSTEM = `${TUNG_PROMPT_RULES}
 
 Scenes (exactly two clips per promo):
 - Scene 1 (product): Keep the product upright and stationary; let light, liquid, or the environment move instead. The first attached image is this scene's first frame.
-- Scene 2 (in-use): A stylist's hands apply the product to a seated customer's hair, framed on the hair lengths and the back or side of the head. Keep the frame on the hair lengths and the back or side of the head. The second attached image is this scene's first frame, with the real product visible at the edge of the frame. The bottle or jar at the edge stays consistent with that image.
+- Scene 2 (in-use): A stylist's hands apply the product through the customer's hair lengths. Show only that application. The bottle or jar belongs in scene 1. The second attached image is this scene's first frame, with no bottle or jar in the shot.
 Reply with JSON: {"clips":[{"prompt", "duration": 5|10, "ratio": "720:1280", "rationale", "scene": "product"|"in-use"}]} for scene 1 then scene 2.`;
 
 const BROLL_MODEL_ENV = 'RUNWAY_BROLL_MODEL';
@@ -260,7 +258,7 @@ function promptUserText(ctx, count, extra = '') {
   ];
   if (count >= 2) {
     lines.push('The first attached image is the product-scene first frame that will be sent to Runway (the product on the counter).');
-    lines.push('The second attached image, when present, is the in-use first frame: a stylist\'s hands applying the product to a seated customer\'s hair, with the real product at the edge of the frame.');
+    lines.push('The second attached image, when present, is the in-use first frame: a stylist\'s hands applying the product through the customer\'s hair lengths. This frame does not include the bottle or jar.');
     lines.push('A further attached image, when present, is the original product photo.');
     lines.push('Write exactly two distinct scenes. Scene 1 is the product scene. Scene 2 is the in-use scene on the customer. Reply with JSON only as {"clips":[{"prompt":"...","duration":5,"ratio":"720:1280","rationale":"...","scene":"product"},{"prompt":"...","duration":5,"ratio":"720:1280","rationale":"...","scene":"in-use"}]}');
   } else {
@@ -354,8 +352,8 @@ function draftBrollSchema(ctx = {}) {
   const t = normalizeType(ctx.productType) || typeFromName(ctx.productName);
   if (!t) return null;
   return {
-    jsonExample: `{"prompt":"product-in-use beat for a ${t}: only hands, the ${t}, and hair texture or lengths; the bottle or jar stays still; do not show a face or a completed style","start_s":n,"end_s":n}`,
-    rules: `Rules: 1-2 product-in-use B-roll beats of 3-5s each, tied to this script (for example a serum pumped into the palm, then smoothed over the lengths; a spray misting the mid-lengths; a mask scooped from a jar with fingers). Show only hands, the ${t}, and hair texture or lengths. Keep the bottle or jar still or barely moving while the hands act. Do not show a face, a completed style, a transformation, or a comparison.`,
+    jsonExample: `{"prompt":"product-in-use beat for a ${t}: scene 1 features the ${t} on the counter; scene 2 shows a stylist's hands working the ${t} through hair lengths","start_s":n,"end_s":n}`,
+    rules: `Rules: 1-2 product B-roll beats of 3-5s each, tied to this script. Scene 1 features the product on the counter, upright and still. Scene 2 shows a stylist's hands applying the product through the customer's hair lengths. Do not show a completed style, a transformation, or a comparison.`,
   };
 }
 
@@ -507,23 +505,15 @@ function inUseSurfaceAvailable(file = IN_USE_SURFACE) {
   return !!(file && fs.existsSync(file));
 }
 
-// Stock/generated salon still of hands in a seated customer's hair from behind, with the real product placed at the edge.
-async function composeInUseFirstFrame(opts = {}) {
-  const surfaceFile = opts.surfaceFile || IN_USE_SURFACE;
+// Scene 2 uses the bare in-use still (no product composited). The asset is already 720x1280.
+async function prepareInUseFirstFrame({ out, surfaceFile = IN_USE_SURFACE, width = COMPOSE.width, height = COMPOSE.height } = {}) {
   if (!inUseSurfaceAvailable(surfaceFile)) {
     throw new Error('in-use first frame surface is missing (assets/broll_in_use.jpg)');
   }
-  return composeFirstFrame({
-    productFile: opts.productFile,
-    surfaceFile,
-    out: opts.out,
-    width: opts.width ?? IN_USE_COMPOSE.width,
-    height: opts.height ?? IN_USE_COMPOSE.height,
-    maxW: opts.maxW ?? IN_USE_COMPOSE.maxW,
-    maxH: opts.maxH ?? IN_USE_COMPOSE.maxH,
-    baseY: opts.baseY ?? IN_USE_COMPOSE.baseY,
-    x: opts.x ?? IN_USE_COMPOSE.x,
-  });
+  if (!out) throw new Error('in-use output path is required');
+  fs.mkdirSync(path.dirname(out), { recursive: true });
+  await ff(['-y', '-i', surfaceFile, '-vf', `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1`, '-frames:v', '1', '-update', '1', out]);
+  return { file: out, width, height, label: null, product: null };
 }
 
 function parseSsim(stderr) {
@@ -618,7 +608,7 @@ async function buildClips(promo, opts = {}) {
   let composed1 = null;
   if (willBeTwo) {
     if (promo.skipCompose && fs.existsSync(still1)) composed1 = { file: still1, label: promo.labelBoxes && promo.labelBoxes[1] };
-    else composed1 = await composeInUseFirstFrame({ productFile: promo.productFile, out: still1 });
+    else composed1 = await prepareInUseFirstFrame({ out: still1 });
   }
   if (needsWrite) {
     const written = await writeRunwayPrompts({
@@ -637,12 +627,14 @@ async function buildClips(promo, opts = {}) {
       if (!fs.existsSync(still)) fs.copyFileSync(composed.file, still);
       composed = { ...composed, file: still };
     }
+    const scene = beats[i].scene || (i === 0 ? 'product' : 'in-use');
     const dur = clampClipDuration(beats[i].duration || promo.clipSeconds || CLIP_SECONDS, beats[i].model || model);
     const clipModel = beats[i].model || model;
     const clipFn = runwayClip || (async ({ dest: d }) => ({ file: d, reused: fs.existsSync(d) }));
     const c = await clipFn({ rw, still: composed.file, prompt: beats[i].prompt, duration: dur, dest, rwOpts, log, model: clipModel });
     let fallback = null, warp = null;
-    if (!c.reused && c.file && fs.existsSync(c.file)) {
+    // Scene 2 has no product label, so skip the SSIM check. Scene 1 keeps the check and the static push-in fallback.
+    if (scene !== 'in-use' && !c.reused && c.file && fs.existsSync(c.file)) {
       warp = await checkWarp({ firstFrame: composed.file, video: c.file, label: composed.label });
       if (warp.warped) {
         await pushIn({ still: composed.file, dest, duration: dur });
@@ -651,19 +643,19 @@ async function buildClips(promo, opts = {}) {
     }
     out.push({
       ...c, file: dest, style: i === 0 ? 'a' : 'b', dur, composite: false,
-      prompt: beats[i].prompt, still: composed.file, label: composed.label,
+      prompt: beats[i].prompt, still: composed.file, label: composed.label || null,
       fallback, warp, reused: !!c.reused, rationale: beats[i].rationale || null,
-      model: clipModel, source: beats[i].source || null, scene: beats[i].scene || (i === 0 ? 'product' : 'in-use'),
+      model: clipModel, source: beats[i].source || null, scene,
     });
   }
   return out;
 }
 
 module.exports = {
-  MODE_ENV, MODE_VALUE, TYPES, GENERIC, CLIP_SECONDS, MAX_CLIPS, LABEL_SSIM_MIN, SURFACE, IN_USE_SURFACE, COMPOSE, IN_USE_COMPOSE, CLIP_NAMES, BEATS,
+  MODE_ENV, MODE_VALUE, TYPES, GENERIC, CLIP_SECONDS, MAX_CLIPS, LABEL_SSIM_MIN, SURFACE, IN_USE_SURFACE, COMPOSE, CLIP_NAMES, BEATS,
   TUNG_PROMPT_RULES, PROMPT_SYSTEM, BROLL_MODEL_ENV, NEGATION_RE,
   enabled, normalizeType, typeFromName, typeFromMeta, inferType, beatsFor, cleanBeatPrompt, draftBrollSchema,
-  plannedClipCount, clipEstimate, maxPromoUsd, cutoutProduct, composeFirstFrame, inUseSurfaceAvailable, composeInUseFirstFrame, parseSsim, ssimOnPair, labelSimilarity,
+  plannedClipCount, clipEstimate, maxPromoUsd, cutoutProduct, composeFirstFrame, inUseSurfaceAvailable, prepareInUseFirstFrame, parseSsim, ssimOnPair, labelSimilarity,
   extractFrame, checkLabelWarp, staticPushIn, buildClips,
   hasNegation, sentenceCount, parsePromptReply, brollModel, clampClipDuration, assessWrittenClip, jpegBase64,
   writeRunwayPrompts, promptUserText,

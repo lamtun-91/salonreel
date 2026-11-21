@@ -177,7 +177,7 @@ function mount({ app, llm, parseJSON, run, cfg, TRACKS, D, id, wrap, slug = A.SA
           const still = path.join(D('cache', p.id), 'broll_draft_still.png');
           const composed = await PB.composeFirstFrame({ productFile, out: still });
           const inUseStill = path.join(D('cache', p.id), 'broll_draft_in_use_still.png');
-          const inUse = await PB.composeInUseFirstFrame({ productFile, out: inUseStill });
+          const inUse = await PB.prepareInUseFirstFrame({ out: inUseStill });
           const written = await PB.writeRunwayPrompts({
             firstFrame: composed.file, inUseFirstFrame: inUse.file, productFile, name: p.product.name, type: p.product.type,
             script: d.script.text, count: PB.MAX_CLIPS,

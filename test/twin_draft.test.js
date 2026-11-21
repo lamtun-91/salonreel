@@ -10,7 +10,7 @@ function draftJson(script) {
   return JSON.stringify({
     script,
     captions: [{ start_s: 0, end_s: 3, text: 'Hair tip' }, { start_s: 3, end_s: 6, text: 'Book via link in bio' }],
-    broll: [{ prompt: 'Slow pan across an empty salon styling station with brushes, no faces', start_s: 4, end_s: 8 }],
+    broll: [{ prompt: 'Slow pan across an empty salon styling station with brushes', start_s: 4, end_s: 8 }],
     product: null, caption: 'A trim tip from Olya Atelier.', hashtags: ['hairtips'],
   });
 }

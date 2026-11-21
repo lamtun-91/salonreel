@@ -1,5 +1,5 @@
 In-use B-roll first-frame background (9:16, 720x1280)
 Source: original still generated for SalonReel (not a third-party stock photograph).
-Purpose: a face-free salon shot of a stylist's hands working product through a seated customer's hair lengths, viewed from behind, with empty marble in the lower left for compositing the real product photo.
+Purpose: a salon shot of a stylist's hands working product through a seated customer's hair lengths, viewed from behind. Used as the scene-2 first frame with no product composited onto it.
 Notes: No real person is depicted. No logos or readable branding. Not a finished-look reveal.
 License: original asset, free to use in SalonReel.

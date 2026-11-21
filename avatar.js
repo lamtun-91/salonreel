@@ -91,7 +91,7 @@ function advanceStub(a, now = Date.now()) {
 function draftPrompt({ template, prompt, mood, language, salon, avatar, hasProduct, productType, productName }) {
   const t = TEMPLATES.find(x => x.id === template) || TEMPLATES[0];
   const contextual = require('./promo_broll').draftBrollSchema({ productType, productName });
-  const brollEx = contextual ? contextual.jsonExample : '{"prompt":"generic salon atmosphere or process shot (station, dryer, foam, tools, interior) - no people\'s faces, no finished hairstyle","start_s":n,"end_s":n}';
+  const brollEx = contextual ? contextual.jsonExample : '{"prompt":"generic salon atmosphere or process shot (station, dryer, foam, tools, interior)","start_s":n,"end_s":n}';
   const brollRules = contextual ? contextual.rules : 'Rules: 1-3 B-roll beats of 3-5s each.';
   return `You write short talking-head Reels for a hair salon called ${salon}. Template: ${t.name} (${t.blurb}). Brief: ${prompt || t.example}
 Speaker: the salon's AI twin "${avatar?.name || 'host'}" (${avatar?.role || 'host'}), speaking to camera. Mood: ${mood}. Language: ${language}.
@@ -204,7 +204,7 @@ function mockDraft({ template, prompt, salon, avatar, hasProduct }) {
   const step = total / lines.length;
   const d = cleanDraft({ script, captions: lines.map((t, i) => ({ start_s: r2(i * step + 0.2), end_s: r2((i + 1) * step - 0.2), text: t })),
     broll: [{ prompt: 'Slow pan across an empty, softly lit salon styling station with brushes and a hairdryer', start_s: r2(total * 0.3), end_s: r2(total * 0.3 + 4) },
-      { prompt: 'Close-up of warm foam lather in a backwash bowl, no faces', start_s: r2(total * 0.6), end_s: r2(total * 0.6 + 4) }],
+      { prompt: 'Close-up of warm foam lather in a backwash bowl', start_s: r2(total * 0.6), end_s: r2(total * 0.6 + 4) }],
     product: hasProduct ? { start_s: r2(total * 0.45), end_s: r2(total * 0.45 + 3) } : null,
     caption: `${(TEMPLATES.find(t => t.id === template) || TEMPLATES[0]).name} from ${salon}. Book via link in bio.`, hashtags: ['hairtips', 'salonlife', 'olyaatelier'] }, { hasProduct });
   return applyScriptLength(d, { hasProduct });

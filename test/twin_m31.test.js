@@ -91,6 +91,7 @@ test('m31: beatsFor returns 1-2 blocklist-clean product-in-use beats per type', 
     assert.equal(beats[1].scene, 'in-use');
     assert.match(beats[1].prompt, /hands/i);
     assert.match(beats[1].prompt, /hair/i);
+    assert.doesNotMatch(beats[1].prompt, /bottle|jar|label|face|back or side of the head/i);
     for (const b of beats) {
       assert.equal(b.duration, 5);
       assert.equal(b.type, type === PB.GENERIC ? PB.GENERIC : type);
@@ -109,14 +110,21 @@ test('m31: cleanBeatPrompt and draft schema enforce the blocklist', () => {
   assert.equal(PB.cleanBeatPrompt('Close-up of a finished hairstyle on a client'), null);
   assert.equal(PB.cleanBeatPrompt('A before and after of the color'), null);
   assert.ok(PB.cleanBeatPrompt('Close-up of hands smoothing serum over hair lengths on a marble counter.'));
+  assert.ok(PB.cleanBeatPrompt('The camera holds as hands work product through the lengths and the customer\'s face is in soft profile.'), 'B-roll may mention a face');
+  assert.equal(A.checkAll({ broll: [{ prompt: "The camera holds as the stylist's hands work through the hair and the customer's face is in frame." }] }).ok, true);
   const schema = PB.draftBrollSchema({ productType: 'serum', productName: 'Repair Serum' });
   assert.ok(schema);
   assert.match(schema.jsonExample, /product-in-use beat for a serum/);
+  assert.doesNotMatch(schema.jsonExample, /face/i);
+  assert.doesNotMatch(schema.rules, /face/i);
   assert.equal(A.checkAll({ broll: [{ prompt: schema.jsonExample }, { prompt: schema.rules }] }).ok, true);
   assert.equal(PB.draftBrollSchema({}), null, 'no type => generic production draft');
   const draft = A.draftPrompt({ template: 'promo', salon: 'Olya Atelier', mood: 'Clean', language: 'English', productType: 'serum', productName: 'Repair Serum' });
   assert.match(draft, /product-in-use beat for a serum/);
   assert.doesNotMatch(draft, /generic salon atmosphere or process shot/);
+  assert.doesNotMatch(draft, /no people'?s faces|do not show a face|no faces/i);
+  const generic = A.draftPrompt({ template: 'promo', salon: 'Olya Atelier', mood: 'Clean', language: 'English' });
+  assert.doesNotMatch(generic, /no people'?s faces|do not show a face|no faces/i);
 });
 
 test('m31: compositor places the real product on the 720x1280 marble still', async () => {
@@ -140,23 +148,17 @@ test('m31: compositor places the real product on the 720x1280 marble still', asy
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('m31: in-use compositor places the real product at the edge of the sanctioned salon still', async () => {
+test('m31: scene 2 uses the bare in-use still with no product composited on it', async () => {
   assert.equal(PB.inUseSurfaceAvailable(), true);
   const dir = tmpDir();
-  const product = makeProduct({ dest: path.join(dir, 'serum.jpg'), kind: 'serum' });
   const out = path.join(dir, 'in_use.png');
-  const r = await PB.composeInUseFirstFrame({ productFile: product, out });
+  const r = await PB.prepareInUseFirstFrame({ out });
   assert.equal(r.width, 720); assert.equal(r.height, 1280);
   assert.deepEqual(probeWxH(out), { w: 720, h: 1280 });
-  assert.equal(r.product.baseY, PB.IN_USE_COMPOSE.baseY);
-  assert.equal(r.product.x, PB.IN_USE_COMPOSE.x);
-  assert.ok(r.product.w <= PB.IN_USE_COMPOSE.maxW);
-  assert.ok(r.product.h <= PB.IN_USE_COMPOSE.maxH);
-  assert.ok(r.product.x >= 0 && r.product.x + r.product.w <= 720);
-  assert.ok(r.label.w > 8 && r.label.h > 8);
-  assert.ok(r.label.x >= r.product.x && r.label.x + r.label.w <= r.product.x + r.product.w);
-  const a = fs.readFileSync(out), b = fs.readFileSync(PB.IN_USE_SURFACE);
-  assert.notEqual(a.length, b.length);
+  assert.equal(r.label, null);
+  assert.equal(r.product, null);
+  const same = await PB.ssimOnPair(out, PB.IN_USE_SURFACE, { x: 0, y: 0, w: 720, h: 1280 });
+  assert.ok(same.ssim != null && same.ssim >= 0.98, `bare still should match the in-use asset, ssim=${same.ssim}`);
   fs.rmSync(dir, { recursive: true, force: true });
 });
 

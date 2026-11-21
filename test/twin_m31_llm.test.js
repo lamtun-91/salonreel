@@ -49,7 +49,9 @@ test('m31 llm: system prompt keeps Tung\'s rules verbatim and requires product t
   assert.ok(PB.PROMPT_SYSTEM.startsWith(VERBATIM));
   assert.match(PB.PROMPT_SYSTEM, /Scene 1 \(product\)/);
   assert.match(PB.PROMPT_SYSTEM, /Scene 2 \(in-use\)/);
-  assert.match(PB.PROMPT_SYSTEM, /stylist'?s hands apply the product to a seated customer'?s hair/i);
+  assert.match(PB.PROMPT_SYSTEM, /stylist'?s hands apply the product through the customer'?s hair lengths/i);
+  assert.match(PB.PROMPT_SYSTEM, /no bottle or jar in the shot/i);
+  assert.doesNotMatch(PB.PROMPT_SYSTEM, /face|back or side of the head|out of frame/i);
 });
 
 test('m31 llm: broll model defaults to gen4_turbo; gen4.5 only inside the $1 cap and ledger remainder', () => {
@@ -250,6 +252,40 @@ test('m31 llm: buildClips uses the product still for scene 1 and the in-use stil
   const a = fs.readFileSync(clips[0].still);
   const b = fs.readFileSync(clips[1].still);
   assert.notEqual(a.equals(b), true, 'product and in-use first frames must differ');
+  assert.equal(clips[1].label, null);
+  const same = await PB.ssimOnPair(clips[1].still, PB.IN_USE_SURFACE, { x: 0, y: 0, w: 720, h: 1280 });
+  assert.ok(same.ssim != null && same.ssim >= 0.98, `scene 2 still should be the bare in-use asset, ssim=${same.ssim}`);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('m31 llm: scene 1 keeps the SSIM label check; scene 2 skips it', async () => {
+  const dir = tmpDir();
+  const product = makeProduct(path.join(dir, 'product.jpg'));
+  let warpCalls = 0, pushCalls = 0;
+  const clips = await PB.buildClips(
+    { productFile: product, type: 'serum', name: 'Repair Serum', beats: PB.beatsFor({ type: 'serum' }) },
+    {
+      dir, env: {},
+      runwayClip: async ({ dest }) => {
+        const { execFileSync } = require('child_process');
+        execFileSync('ffmpeg', ['-y', '-f', 'lavfi', '-i', 'color=0x112233:s=720x1280:d=0.3', '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-preset', 'veryfast', '-t', '0.3', '-an', dest], { stdio: 'pipe' });
+        return { file: dest, reused: false };
+      },
+      checkWarp: async () => { warpCalls += 1; return { warped: true, ssim: 0.2, threshold: PB.LABEL_SSIM_MIN, samples: [] }; },
+      pushIn: async ({ dest, duration }) => {
+        pushCalls += 1;
+        const { execFileSync } = require('child_process');
+        execFileSync('ffmpeg', ['-y', '-f', 'lavfi', '-i', 'color=0xAABBCC:s=720x1280:d=0.3', '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-preset', 'veryfast', '-t', String(duration || 0.3), '-an', dest], { stdio: 'pipe' });
+        return { file: dest, fallback: 'static_push_in', duration };
+      },
+    },
+  );
+  assert.equal(clips.length, 2);
+  assert.equal(warpCalls, 1, 'only the product scene is label-checked');
+  assert.equal(pushCalls, 1);
+  assert.equal(clips[0].fallback, 'static_push_in');
+  assert.equal(clips[1].fallback, null);
+  assert.equal(clips[1].warp, null);
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
