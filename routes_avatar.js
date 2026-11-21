@@ -169,8 +169,21 @@ function mount({ app, llm, parseJSON, run, cfg, TRACKS, D, id, wrap, slug = A.SA
     if (!d) { d = A.mockDraft(ctx); d.mode = 'template'; }
     p.script = { ...d.script, approved: false, approved_at: null, approved_by: null, mode: d.mode }; p.broll = d.broll; p.copy = d.copy; p.total_s = d.total_s;
     if (PB.enabled(env) && p.product) {
-      const llmBeats = (d.broll?.clips || []).map(c => { const prompt = PB.cleanBeatPrompt(c.prompt); return prompt ? { ...c, prompt } : null; }).filter(Boolean).slice(0, PB.MAX_CLIPS);
-      p.broll = { clips: llmBeats.length ? llmBeats : PB.beatsFor({ type: p.product.type, name: p.product.name, script: d.script.text }) };
+      let clips = null;
+      if (live() && p.product.key) {
+        try {
+          const ext = path.extname(p.product.key) || '.jpg';
+          const productFile = await st.getFile(p.product.key, path.join(D('cache', p.id), 'product' + ext));
+          const still = path.join(D('cache', p.id), 'broll_draft_still.png');
+          const composed = await PB.composeFirstFrame({ productFile, out: still });
+          const written = await PB.writeRunwayPrompts({
+            firstFrame: composed.file, productFile, name: p.product.name, type: p.product.type,
+            script: d.script.text, count: PB.MAX_CLIPS,
+          }, { llm, parseJSON, env });
+          clips = written.clips;
+        } catch (e) { console.error('twin broll prompt AI failed, using template beats:', e.message); }
+      }
+      p.broll = { clips: clips && clips.length ? clips : PB.beatsFor({ type: p.product.type, name: p.product.name, script: d.script.text }) };
     }
     p.status = 'awaiting_approval'; await save(p);
   }));
@@ -199,9 +212,12 @@ function mount({ app, llm, parseJSON, run, cfg, TRACKS, D, id, wrap, slug = A.SA
     const items = [];
     if (!(p.heygen?.video_id && await have(CLIPS.heygen))) { const engine = hg.engine(); items.push({ provider: 'heygen', engine, est_usd: HGC.estimateCost({ script: p.script.text, engine }).usd }); }
     if (wantsPromoBroll(p)) {
-      const model = RWC.modelFor({}, env), est = RWC.estimateCost({ model, duration: 5 }).usd;
+      const model = PB.enabled(env) ? PB.brollModel(env) : RWC.modelFor({}, env);
       const names = PB.enabled(env) ? PB.CLIP_NAMES.slice(0, PB.plannedClipCount(p, env)) : [CLIPS.runway];
-      for (const name of names) if (!(await have(name))) items.push({ provider: 'runway', engine: model, est_usd: est });
+      const durs = PB.enabled(env)
+        ? names.map((_, i) => PB.clampClipDuration((p.broll?.clips || [])[i]?.duration, model))
+        : names.map(() => 5);
+      for (let i = 0; i < names.length; i++) if (!(await have(names[i]))) items.push({ provider: 'runway', engine: model, est_usd: RWC.estimateCost({ model, duration: durs[i] }).usd });
     }
     return items;
   }
@@ -225,7 +241,9 @@ function mount({ app, llm, parseJSON, run, cfg, TRACKS, D, id, wrap, slug = A.SA
       promo = { productFile, styleAStill: path.join(__dirname, 'assets', 'broll_countertop.jpg'), compositeProduct: false,
         type: p.product.type, name: p.product.name, script: p.script?.text,
         beats: PB.enabled(env) ? (p.broll?.clips || []).slice(0, PB.MAX_CLIPS) : undefined,
-        buildClips: PB.enabled(env) ? PB.buildClips : undefined };
+        buildClips: PB.enabled(env)
+          ? (pr, opts) => PB.buildClips(pr, { ...opts, llm: live() ? llm : null, parseJSON, env })
+          : undefined };
     }
     let r;
     try { r = await renderHeygen(p, { hg: hgW, run, probeDuration, master: MASTER.masterFile, dir, musicOn, rw: promo ? rwW : null, promo }); }

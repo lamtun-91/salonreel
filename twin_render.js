@@ -22,10 +22,10 @@ function heygenIds(p, hg, env = process.env) {
 }
 
 // M3: one Runway image_to_video B-roll clip (create -> poll -> download). Reuses a clip already on disk so re-renders never pay twice.
-async function runwayClip({ rw, still, prompt, duration = 5, dest, rwOpts = {}, log = () => {} }) {
+async function runwayClip({ rw, still, prompt, duration = 5, dest, rwOpts = {}, log = () => {}, model } = {}) {
   if (fs.existsSync(dest)) return { file: dest, reused: true };
   const promptImage = /^(https:|data:|runway:)/.test(String(still)) ? still : require('./runway_client').dataUri(still);
-  const c = await rw.imageToVideo({ promptImage, promptText: prompt, duration, ratio: '720:1280' }, rwOpts);
+  const c = await rw.imageToVideo({ promptImage, promptText: prompt, duration, ratio: '720:1280', ...(model ? { model } : {}) }, rwOpts);
   log({ runway_task: c.task_id, model: c.model, est_usd: c.estimate?.usd });
   const t = await rw.waitForTask(c.task_id, { ...rwOpts, onPoll: x => log({ runway_poll: x.status }) });
   await rw.download(t.output[0], dest, rwOpts);

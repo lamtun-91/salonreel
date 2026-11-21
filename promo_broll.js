@@ -153,6 +153,185 @@ function beatsFor({ type, script, name, count = MAX_CLIPS, checkAll } = {}) {
   return out;
 }
 
+
+// Tung's Runway prompt-writer system prompt. Keep verbatim.
+const PROMPT_SYSTEM = `You write Runway Gen-4.5 image-to-video prompts for salon product B-roll.
+Rules:
+- Describe ONLY motion: camera movement, subject action, environmental motion.
+- Do not re-describe objects already visible in the image.
+- Positive phrasing only. Never write "no", "don't", "avoid".
+- One scene per clip. Max 2 sentences.
+- Structure: "The camera [motion] as [subject/environment action]."
+- Keep the product upright and stationary; let light, liquid, or
+  environment move instead.
+- Motion must not contradict cues in the image.
+Return JSON: {"prompt", "duration": 5|10, "ratio": "720:1280",
+"rationale"}`;
+
+const BROLL_MODEL_ENV = 'RUNWAY_BROLL_MODEL';
+const NEGATION_RE = /\b(no|not|don't|dont|do not|never|avoid|without)\b/i;
+const hasNegation = (s) => NEGATION_RE.test(String(s || ''));
+
+function sentenceCount(s) {
+  const parts = String(s || '').trim().split(/(?<=[.!?])\s+/).map(x => x.trim()).filter(x => /[A-Za-z]/.test(x));
+  return parts.length;
+}
+
+function defaultParseJSON(s) {
+  const text = String(s || '').trim();
+  const start = text.indexOf('{') >= 0 && (text.indexOf('[') === -1 || text.indexOf('{') < text.indexOf('[')) ? text.indexOf('{') : text.indexOf('[');
+  const end = Math.max(text.lastIndexOf('}'), text.lastIndexOf(']'));
+  if (start < 0 || end < start) throw new Error('no JSON');
+  return JSON.parse(text.slice(start, end + 1));
+}
+
+function parsePromptReply(raw, parseJSON = defaultParseJSON) {
+  const j = parseJSON(raw);
+  if (Array.isArray(j)) return j;
+  if (j && Array.isArray(j.clips)) return j.clips;
+  if (j && typeof j.prompt === 'string') return [j];
+  throw new Error('unexpected JSON shape');
+}
+
+// Default gen4_turbo. gen4.5 only when RUNWAY_BROLL_MODEL requests it and the $1/clip cap (and optional spend ledger remainder) allow a 5s clip.
+function brollModel(env = process.env, { ledgerStatus } = {}) {
+  const requested = String(env[BROLL_MODEL_ENV] || '').trim() || RWC.DEFAULT_MODEL;
+  if (requested === RWC.DEFAULT_MODEL) return RWC.DEFAULT_MODEL;
+  if (requested !== 'gen4.5') return RWC.DEFAULT_MODEL;
+  const est = RWC.estimateCost({ model: 'gen4.5', duration: CLIP_SECONDS });
+  try { RWC.checkCost(est); } catch { return RWC.DEFAULT_MODEL; }
+  if (ledgerStatus && ledgerStatus.remaining_usd != null && Number(ledgerStatus.remaining_usd) + 1e-9 < est.usd) return RWC.DEFAULT_MODEL;
+  return 'gen4.5';
+}
+
+function clampClipDuration(duration, model = RWC.DEFAULT_MODEL) {
+  let d = +duration;
+  if (d !== 5 && d !== 10) d = CLIP_SECONDS;
+  if (d === 10) {
+    try { RWC.checkCost(RWC.estimateCost({ model, duration: 10 })); } catch { d = CLIP_SECONDS; }
+  }
+  return d;
+}
+
+function assessWrittenClip(obj, { model, checkAll } = {}) {
+  if (!obj || typeof obj.prompt !== 'string' || !String(obj.prompt).trim()) return { ok: false, reason: 'shape' };
+  const prompt = String(obj.prompt).replace(/\s+/g, ' ').trim();
+  const duration = clampClipDuration(obj.duration, model);
+  const ratio = '720:1280';
+  const rationale = obj.rationale == null ? '' : String(obj.rationale);
+  if (sentenceCount(prompt) < 1 || sentenceCount(prompt) > 2) return { ok: false, reason: 'sentences', prompt, duration, ratio, rationale };
+  if (hasNegation(prompt)) return { ok: false, reason: 'negation', prompt, duration, ratio, rationale };
+  const cleaned = cleanBeatPrompt(prompt, checkAll);
+  if (!cleaned) return { ok: false, reason: 'blocklist', prompt, duration, ratio, rationale };
+  return { ok: true, reason: null, prompt: cleaned, duration, ratio, rationale };
+}
+
+function toBeat(v, i, { type, model, source }) {
+  return {
+    id: 'p' + (i + 1), type, prompt: v.prompt, start_s: 0, end_s: v.duration, duration: v.duration,
+    ratio: v.ratio || '720:1280', rationale: v.rationale || null, model, source, status: 'planned',
+  };
+}
+
+async function jpegBase64(file) {
+  if (!file || !fs.existsSync(file)) return null;
+  const ext = path.extname(file).toLowerCase();
+  if (ext === '.jpg' || ext === '.jpeg') return fs.readFileSync(file).toString('base64');
+  const tmp = `${file}.${process.pid}.${Date.now()}.llm.jpg`;
+  try {
+    await ff(['-y', '-i', file, '-frames:v', '1', '-q:v', '3', tmp]);
+    return fs.existsSync(tmp) ? fs.readFileSync(tmp).toString('base64') : null;
+  } finally { try { fs.unlinkSync(tmp); } catch {} }
+}
+
+function promptUserText(ctx, count, extra = '') {
+  const lines = [
+    `Product name: ${ctx.name || 'unknown'}.`,
+    `Product type: ${ctx.type || 'unknown'}.`,
+    `Reel script: ${ctx.script || ''}`,
+    '',
+    'The first attached image is the composited first frame that will be sent to Runway. The second attached image, when present, is the original product photo.',
+    `Write ${count} distinct scene${count === 1 ? '' : 's'} for this promo. Reply with JSON only as {"clips":[{"prompt":"...","duration":5,"ratio":"720:1280","rationale":"..."}]} with exactly ${count} clip object${count === 1 ? '' : 's'}, each following the system schema. Each scene must be distinct.`,
+  ];
+  if (extra) lines.push('', extra);
+  return lines.join('\n');
+}
+
+// Vision LLM writes 1-2 Runway prompts from the composited first frame. On failure / invalid JSON, retry once, then fall back to BEATS.
+// A negation-word or blocklist miss also re-prompts once, then falls back.
+async function writeRunwayPrompts(ctx = {}, opts = {}) {
+  const env = opts.env || process.env;
+  const count = Math.min(MAX_CLIPS, Math.max(1, ctx.count || MAX_CLIPS));
+  const type = normalizeType(ctx.type) || typeFromName(ctx.name) || GENERIC;
+  const model = brollModel(env, { ledgerStatus: opts.ledgerStatus });
+  const checkAll = opts.checkAll || checkFn();
+  const parseJSON = opts.parseJSON || defaultParseJSON;
+  const fallback = () => ({
+    clips: beatsFor({ type, name: ctx.name, script: ctx.script, count, checkAll }).map((b, i) => toBeat({ prompt: b.prompt, duration: b.duration, ratio: '720:1280', rationale: null }, i, { type, model, source: 'template' })),
+    source: 'template',
+    model,
+    calls: 0,
+  });
+  if (typeof opts.llm !== 'function') return fallback();
+
+  let images = Array.isArray(opts.images) ? opts.images.slice() : [];
+  if (!images.length) {
+    const a = await jpegBase64(ctx.firstFrame);
+    if (a) images.push(a);
+    if (ctx.productFile && ctx.productFile !== ctx.firstFrame) {
+      const b = await jpegBase64(ctx.productFile);
+      if (b) images.push(b);
+    }
+  }
+  if (!images.length) return fallback();
+
+  const call = async (extra) => {
+    const raw = await opts.llm({ system: PROMPT_SYSTEM, effort: 'low', images, text: promptUserText(ctx, count, extra) });
+    const arr = parsePromptReply(raw, parseJSON);
+    if (!Array.isArray(arr) || arr.length < count) throw new Error('expected ' + count + ' clips');
+    return arr.slice(0, count);
+  };
+
+  const assessAll = (arr) => arr.map(obj => assessWrittenClip(obj, { model, checkAll }));
+  const allOk = rows => rows.length === count && rows.every(r => r.ok);
+
+  let calls = 0, rows, reason;
+  try {
+    calls += 1;
+    rows = assessAll(await call());
+  } catch {
+    try {
+      calls += 1;
+      rows = assessAll(await call('Your last reply was not valid JSON in the required shape. Reply with JSON only as {"clips":[...]} with exactly ' + count + ' clip objects.'));
+    } catch {
+      const fb = fallback(); fb.calls = calls; return fb;
+    }
+  }
+  if (!allOk(rows)) {
+    reason = (rows.find(r => !r.ok) || {}).reason;
+    const hint = reason === 'negation'
+      ? 'Your last prompt used a negation word (no, not, don\'t, never, avoid, without). Rewrite with positive phrasing only. Reply with JSON only.'
+      : reason === 'blocklist'
+        ? 'Your last prompt was blocked by the content rules. Rewrite the motion description. Reply with JSON only.'
+        : 'Your last reply did not meet the schema (shape, at most two sentences, ratio 720:1280). Reply with JSON only.';
+    try {
+      calls += 1;
+      rows = assessAll(await call(hint));
+    } catch {
+      const fb = fallback(); fb.calls = calls; return fb;
+    }
+  }
+  if (!allOk(rows)) {
+    const fb = fallback(); fb.calls = calls; return fb;
+  }
+  return {
+    clips: rows.map((r, i) => toBeat(r, i, { type, model, source: 'llm' })),
+    source: 'llm',
+    model,
+    calls,
+  };
+}
+
 function draftBrollSchema(ctx = {}) {
   const t = normalizeType(ctx.productType) || typeFromName(ctx.productName);
   if (!t) return null;
@@ -381,20 +560,42 @@ async function staticPushIn({ still, dest, duration = CLIP_SECONDS, width = COMP
 const CLIP_NAMES = ['broll_a.mp4', 'broll_b.mp4'];
 
 // Contextual Runway clips. Reuses dest files already on disk (re-edits are $0). After a new generate, check the label; if it warped, replace with a static push-in of the real composited photo.
-async function buildClips(promo, { rw, dir, rwOpts = {}, log = () => {}, runwayClip, checkWarp = checkLabelWarp, pushIn = staticPushIn } = {}) {
+async function buildClips(promo, opts = {}) {
+  const { rw, dir, rwOpts = {}, log = () => {}, runwayClip, checkWarp = checkLabelWarp, pushIn = staticPushIn } = opts;
   if (!dir) throw new Error('buildClips needs a work dir');
   fs.mkdirSync(dir, { recursive: true });
-  const beats = (promo.beats && promo.beats.length ? promo.beats : beatsFor({ type: promo.type, name: promo.name, script: promo.script })).slice(0, MAX_CLIPS);
-  const dur = promo.clipSeconds || CLIP_SECONDS;
+  const env = opts.env || process.env;
+  const model = brollModel(env, { ledgerStatus: opts.ledgerStatus });
+  const still0 = path.join(dir, 'broll_a_still.png');
+  const composed0 = promo.skipCompose && fs.existsSync(still0)
+    ? { file: still0, label: promo.labelBoxes && promo.labelBoxes[0] }
+    : await composeFirstFrame({ productFile: promo.productFile, surfaceFile: promo.styleAStill || SURFACE, out: still0 });
+  let beats = (promo.beats && promo.beats.length ? promo.beats : []).slice(0, MAX_CLIPS);
+  const needsWrite = typeof opts.llm === 'function' && (!beats.length || beats.some(b => b.source !== 'llm' || !b.prompt));
+  if (needsWrite) {
+    const written = await writeRunwayPrompts({
+      firstFrame: composed0.file, productFile: promo.productFile, name: promo.name, type: promo.type,
+      script: promo.script, count: MAX_CLIPS,
+    }, { llm: opts.llm, parseJSON: opts.parseJSON, env, ledgerStatus: opts.ledgerStatus, checkAll: opts.checkAll });
+    beats = written.clips;
+  }
+  if (!beats.length) beats = beatsFor({ type: promo.type, name: promo.name, script: promo.script });
   const out = [];
   for (let i = 0; i < beats.length; i++) {
     const dest = path.join(dir, CLIP_NAMES[i]);
     const still = path.join(dir, `broll_${i === 0 ? 'a' : 'b'}_still.png`);
-    const composed = promo.skipCompose && fs.existsSync(still)
-      ? { file: still, label: promo.labelBoxes && promo.labelBoxes[i] }
-      : await composeFirstFrame({ productFile: promo.productFile, surfaceFile: promo.styleAStill || SURFACE, out: still });
+    let composed = composed0;
+    if (i > 0) {
+      if (promo.skipCompose && fs.existsSync(still)) composed = { file: still, label: promo.labelBoxes && promo.labelBoxes[i] };
+      else {
+        fs.copyFileSync(composed0.file, still);
+        composed = { ...composed0, file: still };
+      }
+    }
+    const dur = clampClipDuration(beats[i].duration || promo.clipSeconds || CLIP_SECONDS, beats[i].model || model);
+    const clipModel = beats[i].model || model;
     const clipFn = runwayClip || (async ({ dest: d }) => ({ file: d, reused: fs.existsSync(d) }));
-    const c = await clipFn({ rw, still: composed.file, prompt: beats[i].prompt, duration: dur, dest, rwOpts, log });
+    const c = await clipFn({ rw, still: composed.file, prompt: beats[i].prompt, duration: dur, dest, rwOpts, log, model: clipModel });
     let fallback = null, warp = null;
     if (!c.reused && c.file && fs.existsSync(c.file)) {
       warp = await checkWarp({ firstFrame: composed.file, video: c.file, label: composed.label });
@@ -406,7 +607,8 @@ async function buildClips(promo, { rw, dir, rwOpts = {}, log = () => {}, runwayC
     out.push({
       ...c, file: dest, style: i === 0 ? 'a' : 'b', dur, composite: false,
       prompt: beats[i].prompt, still: composed.file, label: composed.label,
-      fallback, warp, reused: !!c.reused,
+      fallback, warp, reused: !!c.reused, rationale: beats[i].rationale || null,
+      model: clipModel, source: beats[i].source || null,
     });
   }
   return out;
@@ -414,7 +616,10 @@ async function buildClips(promo, { rw, dir, rwOpts = {}, log = () => {}, runwayC
 
 module.exports = {
   MODE_ENV, MODE_VALUE, TYPES, GENERIC, CLIP_SECONDS, MAX_CLIPS, LABEL_SSIM_MIN, SURFACE, COMPOSE, CLIP_NAMES, BEATS,
+  PROMPT_SYSTEM, BROLL_MODEL_ENV, NEGATION_RE,
   enabled, normalizeType, typeFromName, typeFromMeta, inferType, beatsFor, cleanBeatPrompt, draftBrollSchema,
   plannedClipCount, clipEstimate, maxPromoUsd, cutoutProduct, composeFirstFrame, parseSsim, ssimOnPair, labelSimilarity,
   extractFrame, checkLabelWarp, staticPushIn, buildClips,
+  hasNegation, sentenceCount, parsePromptReply, brollModel, clampClipDuration, assessWrittenClip, jpegBase64,
+  writeRunwayPrompts, promptUserText,
 };
