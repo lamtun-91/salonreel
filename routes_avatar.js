@@ -1,10 +1,10 @@
 'use strict';
 // "Your AI Twin" API (M1, stubbed): /api/twin/*. Mounted only when ENABLE_AI_TWIN=1; with the flag off nothing here is
 // registered, so /api/twin/* falls through to Express's 404 and the Twin page assets are refused by staticGuard.
-// M1 makes NO HeyGen / Runway calls (heygen.js / runway.js are stubs); renders are local ffmpeg slates with the AI label.
+// M2: with HEYGEN_API_KEY + HEYGEN_LIVE=1 a Sample (stock) avatar renders via HeyGen v3 (twin_render.js); spend additionally needs HEYGEN_ALLOW_SPEND=1 (v3 has no free test mode). Otherwise renders are local ffmpeg stubs. Runway stays a stub until M3.
 const fs = require('fs'), path = require('path');
 const st = require('./storage'), A = require('./avatar'), MASTER = require('./master'), MUSIC = require('./music');
-const HG = require('./heygen'), RW = require('./runway'), S = require('./studio');
+const HG = require('./heygen'), RW = require('./runway'), S = require('./studio'), TR = require('./twin_render');
 
 const TWIN_CONSENT = 'I am the person in this AI twin, or I have their permission, and I will turn on Instagram\'s AI info label when I post.';
 const IG_AI_REMINDER = 'When you post this Reel, turn on Instagram\'s "AI info" label (Advanced settings → AI label) - this video was made with AI.';
@@ -42,7 +42,7 @@ function mount({ app, llm, parseJSON, run, cfg, TRACKS, D, id, wrap, slug = A.SA
 
   app.get('/api/twin/config', (q, s) => s.json({ enabled: true, stub: true, templates: A.TEMPLATES, defaultSalon: A.DEFAULT_SALON, moods: S.MOODS,
     tracks: Object.entries(TRACKS).map(([k, v]) => ({ id: k, label: v.label, name: v.name, moodLabel: v.moodLabel, bpm: v.bpm })), defaultTrack: MUSIC.DEFAULT,
-    heygenTest: HG.testMode(), heygenConfigured: HG.configured(), runwayConfigured: RW.configured(), llmLive: live(), consent: TWIN_CONSENT, igAiLabelReminder: IG_AI_REMINDER,
+    heygenTest: HG.testMode(), heygenTestNote: HG.TEST_MODE_NOTE, heygenConfigured: HG.configured(), runwayConfigured: RW.configured(), llmLive: live(), consent: TWIN_CONSENT, igAiLabelReminder: IG_AI_REMINDER,
     aiLabel: A.AI_LABEL, duration: A.DURATION, poweredBy: { name: 'Runway', url: 'https://runway.com' } }));
 
   app.get('/api/twin/avatars', w(async (q, s) => s.json(await listCards())));
@@ -104,7 +104,7 @@ function mount({ app, llm, parseJSON, run, cfg, TRACKS, D, id, wrap, slug = A.SA
     const p = { id: id(), path: A.PATH, template, created: now, status: 'brief',
       profile: { salon: String(b.salon || A.DEFAULT_SALON).slice(0, 60) || A.DEFAULT_SALON },
       inputs: { mood: S.MOODS.includes(b.mood) ? b.mood : S.MOODS[0], music: TRACKS[b.music] ? b.music : MUSIC.DEFAULT, language: String(b.language || 'English').slice(0, 30), prompt: String(b.prompt || '').slice(0, 600) },
-      avatar_id: a.id, avatar: { id: a.id, name: a.name, role: a.role, kind: a.kind, sample: a.kind === 'sample', thumbnail: a.thumbnail, stub: !!a.stub },
+      avatar_id: a.id, avatar: { id: a.id, name: a.name, role: a.role, kind: a.kind, sample: a.kind === 'sample', thumbnail: a.thumbnail, stub: !!a.stub, heygen_avatar_id: a.heygen_avatar_id || null, voice_id: a.voice_id || null },
       script: null, broll: { clips: [] }, product: null, copy: null, musicOn: TRACKS[b.music] ? b.music !== 'none' : true, render: null, renderVariants: {}, export: null, consent: null, stub: true };
     L.last_used_avatar_id = a.id; await saveLib(L);
     await save(p); s.json(await view(p)); }));
@@ -147,6 +147,18 @@ function mount({ app, llm, parseJSON, run, cfg, TRACKS, D, id, wrap, slug = A.SA
     if (p.product && q.body.product) { const a = Math.max(0, Math.min(r.total - 2, +q.body.product.slot_start_s || 0)); p.product.slot_start_s = a; p.product.slot_end_s = Math.min(r.total, Math.max(a + 2, +q.body.product.slot_end_s || a + 3)); }
     p.status = 'approved'; await save(p); s.json(await view(p)); }));
 
+  // ---------- M2 live render (HeyGen Sample avatar) - only when HEYGEN_API_KEY + HEYGEN_LIVE=1; spend additionally needs HEYGEN_ALLOW_SPEND=1 ----------
+  const probeDuration = async f => { const o = await run('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', f]); return +String(o?.stdout ?? o).trim(); };
+  async function renderLive(p, { musicOn = p.musicOn } = {}) {
+    const dir = D('cache', p.id);
+    const r = await TR.renderHeygen(p, { hg: HG, run, probeDuration, master: MASTER.masterFile, dir, musicOn,
+      getProduct: async (k, d) => { const f = path.join(d, path.basename(k)); if (!fs.existsSync(f)) await st.getFile(k, f); return f; } });
+    p.heygen = r.heygen;
+    const key = `projects/${p.id}/renders/${path.basename(r.out)}`; await st.putFile(key, r.out, 'video/mp4'); fs.unlinkSync(r.out);
+    return { key, duration: r.duration, music: r.music, track: r.track, loudness: r.loudness, ai_label: r.ai_label, stub: false, heygen_video_id: r.heygen.video_id, at: new Date().toISOString() };
+  }
+  const renderAny = (p, o) => (HG.configured() && (p.avatar?.heygen_avatar_id || p.avatar?.sample)) ? renderLive(p, o) : renderStub(p, o);
+
   // ---------- stub render ----------
   async function renderStub(p, { musicOn = p.musicOn } = {}) {
     const dir = D('cache', p.id); fs.mkdirSync(dir, { recursive: true });
@@ -166,7 +178,7 @@ function mount({ app, llm, parseJSON, run, cfg, TRACKS, D, id, wrap, slug = A.SA
   const needApproved = async p => { if (!p.script?.approved) throw err(400, 'Approve the script before rendering'); };
   app.post('/api/twin/projects/:id/render', job('render', needApproved, async p => {
     p.status = 'rendering'; await save(p);
-    try { p.render = await renderStub(p); p.renderVariants = { [p.render.music ? 'music' : 'no_music']: p.render.key }; p.status = 'review'; }
+    try { p.render = await renderAny(p); p.renderVariants = { [p.render.music ? 'music' : 'no_music']: p.render.key }; p.status = 'review'; }
     catch (e) { p.status = 'error'; p.error = e.message; await save(p); throw e; }
     await save(p); }));
   app.post('/api/twin/projects/:id/rerender', job('rerender', async (p, q) => { await needApproved(p); if (!p.render) throw err(400, 'Render first');
@@ -175,7 +187,7 @@ function mount({ app, llm, parseJSON, run, cfg, TRACKS, D, id, wrap, slug = A.SA
     if (Array.isArray(b.captions)) p.script.captions = require('./pipeline').cleanSegments(b.captions.map(c => ({ ...c, text: String(c.text || '').slice(0, 80) })), p.total_s, 'text');
     if (b.copy) p.copy = { caption: String(b.copy.caption ?? p.copy?.caption ?? '').slice(0, 2200), hashtags: Array.isArray(b.copy.hashtags) ? b.copy.hashtags.slice(0, 15) : p.copy?.hashtags || [] };
     p.status = 'rendering'; await save(p);
-    try { p.render = await renderStub(p); p.renderVariants = { [p.render.music ? 'music' : 'no_music']: p.render.key }; p.status = 'review'; }
+    try { p.render = await renderAny(p); p.renderVariants = { [p.render.music ? 'music' : 'no_music']: p.render.key }; p.status = 'review'; }
     catch (e) { p.status = 'error'; p.error = e.message; await save(p); throw e; }
     await save(p); }));
   app.post('/api/twin/projects/:id/export', w(async (q, s) => {
@@ -184,7 +196,7 @@ function mount({ app, llm, parseJSON, run, cfg, TRACKS, D, id, wrap, slug = A.SA
     if (b.consent !== true) throw err(400, 'Please confirm: ' + TWIN_CONSENT);
     const music = b.music !== false && p.render.music;
     const vk = music ? 'music' : 'no_music';
-    if (!p.renderVariants?.[vk]) { const r = await renderStub(p, { musicOn: music }); p.renderVariants = { ...(p.renderVariants || {}), [vk]: r.key }; }
+    if (!p.renderVariants?.[vk]) { const r = await renderAny(p, { musicOn: music }); p.renderVariants = { ...(p.renderVariants || {}), [vk]: r.key }; }
     if (b.caption != null || b.hashtags) p.copy = { caption: String(b.caption ?? p.copy?.caption ?? '').slice(0, 2200), hashtags: Array.isArray(b.hashtags) ? b.hashtags.slice(0, 15) : p.copy?.hashtags || [] };
     p.consent = { text: TWIN_CONSENT, accepted: true, at: new Date().toISOString() };
     p.export = { at: new Date().toISOString(), music, key: p.renderVariants[vk], ai_label: A.AI_LABEL, ig_ai_label_reminder: true }; p.status = 'exported'; await save(p);

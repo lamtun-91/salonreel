@@ -183,6 +183,30 @@ function stubFfmpegArgs({ total, timeline, assPath, productFile, musicFile, musi
 }
 const musicFor = (track, musicOn) => (musicOn === false || !track || track === 'none') ? null : MUSIC.fileFor(track);
 
+// M2: assemble a HeyGen talking-head (any aspect) into the 1080x1920 reel: cover-crop to 9:16, optional real product
+// photo on a white card in its window, ASS (brand + captions + always-on AI label), HeyGen speech kept with the music
+// bed ducked underneath (or speech only when music is off).
+const MUSIC_UNDER_SPEECH_DB = -20;
+function twinAssembleArgs({ talking, total, assPath, productFile, product, musicFile, musicStart = 0, out, fontsdir = '/usr/share/fonts/truetype/dejavu', ffEsc = s => s.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'") }) {
+  if (!talking) throw new Error('talking-head file is required');
+  const T = (+total).toFixed(3);
+  const args = ['-y', '-i', talking];
+  let vi = 1;
+  let fc = '[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30[bg]'; let last = '[bg]';
+  if (productFile && product) { args.push('-loop', '1', '-t', T, '-i', productFile);
+    fc += `;[${vi}:v]scale=600:540:force_original_aspect_ratio=decrease,pad=iw+32:ih+32:16:16:color=white,format=rgba[pr];${last}[pr]overlay=(W-w)/2:470:enable='between(t,${product.slot_start_s},${product.slot_end_s})'[bp]`; last = '[bp]'; vi++; }
+  fc += `;${last}subtitles='${ffEsc(assPath)}':fontsdir=${fontsdir},format=yuv420p[vout]`;
+  fc += `;[0:a]aformat=sample_rates=44100:channel_layouts=stereo,apad,atrim=0:${T}[sp]`;
+  if (musicFile) { args.push('-ss', String(musicStart), '-i', musicFile);
+    fc += `;[${vi}:a]aformat=sample_rates=44100:channel_layouts=stereo,volume=${MUSIC_UNDER_SPEECH_DB}dB,apad,atrim=0:${T},afade=t=out:st=${Math.max(0, total - 1).toFixed(3)}:d=1[mu];[sp][mu]amix=inputs=2:duration=first:normalize=0[aout]`; }
+  else fc += ';[sp]anull[aout]';
+  args.push('-filter_complex', fc, '-map', '[vout]', '-map', '[aout]', '-t', T, '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '21', '-pix_fmt', 'yuv420p',
+    '-c:a', 'aac', '-b:a', '160k', '-ar', '44100', '-movflags', '+faststart', out);
+  return args;
+}
+// Reel length for a HeyGen clip: the spoken clip's own length, capped at the Twin max.
+const twinTotal = (clipDuration, cap = DURATION.max) => r2(Math.max(1, Math.min(cap, +clipDuration || 0)));
+
 module.exports = { PATH, SALON_SLUG, DEFAULT_SALON, AI_LABEL, AI_LABEL_ZONE, DURATION, TEMPLATES, ROLES, BLOCK, checkText, checkAll, BlockedError,
   cardStatus, selectable, stubSeed, cardView, preselect, newAvatar, advanceStub, draftPrompt, cleanDraft, mockDraft, cleanApproval, estimateDuration,
-  buildTwinAss, stubTimeline, stubFfmpegArgs, musicFor, COLORS };
+  buildTwinAss, stubTimeline, stubFfmpegArgs, musicFor, COLORS, twinAssembleArgs, twinTotal, MUSIC_UNDER_SPEECH_DB };
