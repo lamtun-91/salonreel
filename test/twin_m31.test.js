@@ -174,8 +174,48 @@ test('m31: SSIM of the label region detects a warp and leaves an identical pair 
   const warped = path.join(dir, 'warped.png');
   const { x, y, w, h } = composed.label;
   execFileSync('ffmpeg', ['-y', '-i', first, '-vf', `drawbox=${x}:${y}:${w}:${h}:color=black:t=fill`, warped], { stdio: 'pipe' });
-  const bad = await PB.ssimOnPair(first, warped, composed.label);
+  // Fixed-crop still flags a label that was painted out in place.
+  const bad = await PB.ssimOnPair(first, warped, composed.label, { track: false });
   assert.ok(bad.ssim != null && bad.ssim < PB.LABEL_SSIM_MIN, `warped ssim ${bad.ssim} should be < ${PB.LABEL_SSIM_MIN} (box ${w}x${h} at ${x},${y})`);
+  assert.equal(bad.warped, true);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('m31: label check tracks a camera push-in and still flags a garbled label', async () => {
+  const dir = tmpDir();
+  const product = makeProduct({ dest: path.join(dir, 'serum.jpg'), kind: 'serum' });
+  const first = path.join(dir, 'first.png');
+  const composed = await PB.composeFirstFrame({ productFile: product, out: first });
+  const { x, y, w, h } = composed.label;
+  // High-contrast marks on the label so a misaligned crop cannot pass SSIM by accident.
+  const marked = path.join(dir, 'marked.png');
+  const bw = Math.max(4, Math.floor(w / 5)), bh = Math.max(4, h - 16);
+  const mx = x + 8, my = y + 8;
+  execFileSync('ffmpeg', ['-y', '-i', first, '-vf',
+    `drawbox=${mx}:${my}:${bw}:${bh}:color=black:t=fill,` +
+    `drawbox=${x + Math.floor(w * 0.4)}:${y + 16}:${Math.max(4, Math.floor(w / 6))}:${Math.max(4, Math.floor(h / 3))}:color=0x2244AA:t=fill,` +
+    `drawbox=${x + 8}:${y + Math.floor(h * 0.6)}:${Math.max(4, w - 16)}:${Math.max(4, Math.floor(h / 8))}:color=0xAA2222:t=fill`,
+    marked], { stdio: 'pipe' });
+  const z = 1.22;
+  const cx = x + w / 2, cy = y + h / 2;
+  const sw = Math.round(720 * z), sh = Math.round(1280 * z);
+  const cropX = Math.max(0, Math.min(sw - 720, Math.round(cx * z - 720 / 2)));
+  const cropY = Math.max(0, Math.min(sh - 1280, Math.round(cy * z - 1280 / 2)));
+  const zoomed = path.join(dir, 'zoomed.png');
+  execFileSync('ffmpeg', ['-y', '-i', marked, '-vf', `scale=${sw}:${sh},crop=720:1280:${cropX}:${cropY}`, zoomed], { stdio: 'pipe' });
+  const fixed = await PB.ssimOnPair(marked, zoomed, composed.label, { track: false });
+  const tracked = await PB.ssimOnPair(marked, zoomed, composed.label);
+  assert.ok(fixed.ssim != null && fixed.ssim < PB.LABEL_SSIM_MIN, `fixed crop should false-flag a ${z}x push-in, ssim=${fixed.ssim}`);
+  assert.ok(tracked.ssim != null && tracked.ssim >= PB.LABEL_SSIM_MIN, `tracked crop should hold on a ${z}x push-in, ssim=${tracked.ssim} match=${JSON.stringify(tracked.match)}`);
+  assert.equal(tracked.warped, false);
+  assert.ok(tracked.match && tracked.match.scale >= 1.12, `expected a zoomed match, got ${JSON.stringify(tracked.match)}`);
+
+  const garbled = path.join(dir, 'garbled.png');
+  execFileSync('ffmpeg', ['-y', '-i', marked, '-filter_complex',
+    `[0:v]crop=${w}:${h}:${x}:${y},negate[l];[0:v][l]overlay=${x}:${y}`,
+    '-frames:v', '1', garbled], { stdio: 'pipe' });
+  const bad = await PB.ssimOnPair(marked, garbled, composed.label);
+  assert.ok(bad.ssim != null && bad.ssim < PB.LABEL_SSIM_MIN, `garbled label should still fail, ssim=${bad.ssim}`);
   assert.equal(bad.warped, true);
   fs.rmSync(dir, { recursive: true, force: true });
 });

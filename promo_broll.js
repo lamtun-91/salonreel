@@ -2,7 +2,7 @@
 // M3.1 contextual product B-roll for AI Twin Promo. Off unless PROMO_BROLL_MODE=contextual.
 // Default production path (fixed BROLL_PROMPTS.a + countertop still) is unchanged when the flag is off.
 // No network of its own: callers inject llm / Runway / ffmpeg. Never call paid providers from tests.
-const fs = require('fs'), path = require('path'), { execFile } = require('child_process'), { promisify } = require('util');
+const fs = require('fs'), path = require('path'), os = require('os'), { execFile } = require('child_process'), { promisify } = require('util');
 const exec = promisify(execFile);
 const RWC = require('./runway_client');
 
@@ -505,7 +505,7 @@ function inUseSurfaceAvailable(file = IN_USE_SURFACE) {
   return !!(file && fs.existsSync(file));
 }
 
-// Scene 2 uses the bare in-use still (no product composited). The asset is already 720x1280.
+// Scene 2 uses the bare in-use still (no product composited). The 9:16 asset is scaled to the 720x1280 first-frame size.
 async function prepareInUseFirstFrame({ out, surfaceFile = IN_USE_SURFACE, width = COMPOSE.width, height = COMPOSE.height } = {}) {
   if (!inUseSurfaceAvailable(surfaceFile)) {
     throw new Error('in-use first frame surface is missing (assets/broll_in_use.jpg)');
@@ -521,34 +521,191 @@ function parseSsim(stderr) {
   return m ? Number(m[1]) : null;
 }
 
-// Compare the label crop on the composed first frame with later frames from a clip. Low SSIM => warped label.
-async function labelSimilarity({ firstFrame, other, label }) {
-  if (!firstFrame || !other || !fs.existsSync(firstFrame) || !fs.existsSync(other)) throw new Error('labelSimilarity needs two image files');
-  const box = label || { x: 200, y: 400, w: 320, h: 200 };
-  const crop = `crop=${box.w}:${box.h}:${box.x}:${box.y},format=gray`;
-  try {
-    await ff(['-i', firstFrame, '-i', other, '-filter_complex', `[0:v]${crop}[a];[1:v]${crop}[b];[a][b]ssim`, '-f', 'null', '-']);
-    return { ssim: 1, warped: false, reason: 'ffmpeg succeeded without ssim stats; treat as similar' };
-  } catch (e) {
-    // ffmpeg ssim writes stats to stderr and exits 0; some builds still throw if no output file. Read stderr either way.
-    const ssim = parseSsim(e.stderr || e.stdout || e.message);
-    if (ssim == null && !(e.stderr || e.stdout)) throw e;
-    if (ssim == null) {
-      // retry capturing stderr from a resolved run by using execFile and ignoring exit
-      const ssim2 = parseSsim(e.stderr);
-      return { ssim: ssim2, warped: ssim2 == null ? false : ssim2 < LABEL_SSIM_MIN, threshold: LABEL_SSIM_MIN };
-    }
-    return { ssim, warped: ssim < LABEL_SSIM_MIN, threshold: LABEL_SSIM_MIN };
-  }
+const LABEL_SEARCH = Object.freeze({
+  // Search around the original box, and across a scale range, so a camera push-in is followed
+  // instead of being scored against a stale crop.
+  margin: 220,
+  scales: [0.80, 0.86, 0.92, 0.96, 1.00, 1.04, 1.08, 1.12, 1.16, 1.18, 1.20, 1.22, 1.24, 1.28, 1.32, 1.36, 1.42, 1.50, 1.58, 1.66, 1.76],
+  downscale: 4,
+});
+
+async function probeWxH(file) {
+  const probe = await exec('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=p=0', file]);
+  const [w, h] = String(probe.stdout).trim().split(',').map(Number);
+  if (!(w > 0 && h > 0)) throw new Error('probe failed for ' + file);
+  return { w, h };
 }
 
-async function ssimOnPair(firstFrame, other, label) {
+async function readGray(file) {
+  const { w, h } = await probeWxH(file);
+  const { stdout } = await exec('ffmpeg', ['-v', 'error', '-i', file, '-f', 'rawvideo', '-pix_fmt', 'gray', '-frames:v', '1', 'pipe:1'], { encoding: 'buffer', maxBuffer: w * h + 4096, timeout: 30000 });
+  const data = Buffer.from(stdout);
+  if (data.length < w * h) throw new Error('short gray read');
+  return { w, h, data: data.subarray(0, w * h) };
+}
+
+function cropGray(img, box) {
+  const x = Math.max(0, Math.round(box.x));
+  const y = Math.max(0, Math.round(box.y));
+  const w = Math.max(1, Math.round(box.w));
+  const h = Math.max(1, Math.round(box.h));
+  const ww = Math.max(1, Math.min(w, img.w - x));
+  const hh = Math.max(1, Math.min(h, img.h - y));
+  const data = Buffer.alloc(ww * hh);
+  for (let row = 0; row < hh; row++) {
+    img.data.copy(data, row * ww, (y + row) * img.w + x, (y + row) * img.w + x + ww);
+  }
+  return { w: ww, h: hh, data };
+}
+
+function resizeGray(img, nw, nh) {
+  nw = Math.max(1, Math.round(nw));
+  nh = Math.max(1, Math.round(nh));
+  if (nw === img.w && nh === img.h) return img;
+  const data = Buffer.alloc(nw * nh);
+  const xScale = img.w / nw, yScale = img.h / nh;
+  for (let y = 0; y < nh; y++) {
+    const sy = Math.min(img.h - 1, y * yScale);
+    const y0 = Math.floor(sy), y1 = Math.min(img.h - 1, y0 + 1), fy = sy - y0;
+    for (let x = 0; x < nw; x++) {
+      const sx = Math.min(img.w - 1, x * xScale);
+      const x0 = Math.floor(sx), x1 = Math.min(img.w - 1, x0 + 1), fx = sx - x0;
+      const a = img.data[y0 * img.w + x0];
+      const b = img.data[y0 * img.w + x1];
+      const c = img.data[y1 * img.w + x0];
+      const d = img.data[y1 * img.w + x1];
+      data[y * nw + x] = Math.round(a * (1 - fx) * (1 - fy) + b * fx * (1 - fy) + c * (1 - fx) * fy + d * fx * fy);
+    }
+  }
+  return { w: nw, h: nh, data };
+}
+
+function templateStats(tmpl) {
+  const n = tmpl.w * tmpl.h;
+  let sum = 0, sum2 = 0;
+  for (let i = 0; i < n; i++) { const v = tmpl.data[i]; sum += v; sum2 += v * v; }
+  return { mean: sum / n, varT: sum2 - (sum * sum) / n, n };
+}
+
+function nccAt(img, tmpl, stats, x, y) {
+  const tw = tmpl.w, th = tmpl.h;
+  if (x < 0 || y < 0 || x + tw > img.w || y + th > img.h) return -1;
+  let sumI = 0, sumI2 = 0, sumIT = 0;
+  for (let row = 0; row < th; row++) {
+    const iOff = (y + row) * img.w + x;
+    const tOff = row * tw;
+    for (let col = 0; col < tw; col++) {
+      const iv = img.data[iOff + col];
+      const tv = tmpl.data[tOff + col];
+      sumI += iv;
+      sumI2 += iv * iv;
+      sumIT += iv * tv;
+    }
+  }
+  const cov = sumIT - stats.mean * sumI;
+  const varI = sumI2 - (sumI * sumI) / stats.n;
+  const den = Math.sqrt(Math.max(0, varI) * Math.max(0, stats.varT));
+  if (den < 1e-6) return 0;
+  return cov / den;
+}
+
+function matchTemplate(img, tmpl, box, opts = {}) {
+  const margin = opts.margin == null ? LABEL_SEARCH.margin : opts.margin;
+  const scales = opts.scales || LABEL_SEARCH.scales;
+  const factor = opts.downscale || LABEL_SEARCH.downscale;
+  const imgS = resizeGray(img, Math.max(1, Math.floor(img.w / factor)), Math.max(1, Math.floor(img.h / factor)));
+  let best = { score: -Infinity, x: Math.round(box.x), y: Math.round(box.y), w: Math.round(box.w), h: Math.round(box.h), scale: 1 };
+
+  function consider(score, x, y, w, h, scale) {
+    if (score > best.score) best = { score, x, y, w, h, scale };
+  }
+
+  // Always score the original box at scale 1 so an unchanged frame stays put.
+  const origX = Math.max(0, Math.min(img.w - Math.round(box.w), Math.round(box.x)));
+  const origY = Math.max(0, Math.min(img.h - Math.round(box.h), Math.round(box.y)));
+  if (origX + Math.round(box.w) <= img.w && origY + Math.round(box.h) <= img.h) {
+    const origT = (Math.round(box.w) === tmpl.w && Math.round(box.h) === tmpl.h) ? tmpl : resizeGray(tmpl, Math.round(box.w), Math.round(box.h));
+    consider(nccAt(img, origT, templateStats(origT), origX, origY), origX, origY, origT.w, origT.h, 1);
+  }
+
+  for (const scale of scales) {
+    const tw = Math.max(4, Math.round(box.w * scale));
+    const th = Math.max(4, Math.round(box.h * scale));
+    if (tw >= img.w || th >= img.h) continue;
+    const tmplScaled = (tw === tmpl.w && th === tmpl.h) ? tmpl : resizeGray(tmpl, tw, th);
+    const tmplCoarse = resizeGray(tmplScaled, Math.max(2, Math.floor(tw / factor)), Math.max(2, Math.floor(th / factor)));
+    const statsC = templateStats(tmplCoarse);
+    const extraX = Math.max(margin, Math.abs(tw - box.w) + 16);
+    const extraY = Math.max(margin, Math.abs(th - box.h) + 16);
+    const x0 = Math.max(0, Math.floor(box.x - extraX));
+    const y0 = Math.max(0, Math.floor(box.y - extraY));
+    const x1 = Math.min(img.w - tw, Math.ceil(box.x + extraX));
+    const y1 = Math.min(img.h - th, Math.ceil(box.y + extraY));
+    const cx0 = Math.max(0, Math.floor(x0 / factor));
+    const cy0 = Math.max(0, Math.floor(y0 / factor));
+    const cx1 = Math.max(cx0, Math.min(imgS.w - tmplCoarse.w, Math.floor(x1 / factor)));
+    const cy1 = Math.max(cy0, Math.min(imgS.h - tmplCoarse.h, Math.floor(y1 / factor)));
+    let coarse = { score: -Infinity, cx: cx0, cy: cy0 };
+    for (let cy = cy0; cy <= cy1; cy++) {
+      for (let cx = cx0; cx <= cx1; cx++) {
+        const sc = nccAt(imgS, tmplCoarse, statsC, cx, cy);
+        if (sc > coarse.score) coarse = { score: sc, cx, cy };
+      }
+    }
+    const statsF = templateStats(tmplScaled);
+    const pad = factor * 2;
+    const fx0 = Math.max(0, coarse.cx * factor - pad);
+    const fy0 = Math.max(0, coarse.cy * factor - pad);
+    const fx1 = Math.min(img.w - tw, coarse.cx * factor + pad);
+    const fy1 = Math.min(img.h - th, coarse.cy * factor + pad);
+    for (let y = fy0; y <= fy1; y++) {
+      for (let x = fx0; x <= fx1; x++) {
+        consider(nccAt(img, tmplScaled, statsF, x, y), x, y, tw, th, scale);
+      }
+    }
+  }
+  // Refine scale around the best coarse hit so a push-in that sits between grid steps still aligns.
+  if (best.score > -Infinity) {
+    const refine = [];
+    for (let d = -4; d <= 4; d++) {
+      const sc = Math.round((best.scale + d * 0.01) * 100) / 100;
+      if (sc >= 0.75 && sc <= 1.85 && !scales.includes(sc) && !refine.includes(sc)) refine.push(sc);
+    }
+    for (const scale of refine) {
+      const tw = Math.max(4, Math.round(box.w * scale));
+      const th = Math.max(4, Math.round(box.h * scale));
+      if (tw >= img.w || th >= img.h) continue;
+      const tmplScaled = resizeGray(tmpl, tw, th);
+      const statsF = templateStats(tmplScaled);
+      const fx0 = Math.max(0, best.x - 8);
+      const fy0 = Math.max(0, best.y - 8);
+      const fx1 = Math.min(img.w - tw, best.x + 8);
+      const fy1 = Math.min(img.h - th, best.y + 8);
+      for (let y = fy0; y <= fy1; y++) {
+        for (let x = fx0; x <= fx1; x++) {
+          consider(nccAt(img, tmplScaled, statsF, x, y), x, y, tw, th, scale);
+        }
+      }
+    }
+  }
+  return best;
+}
+
+async function locateLabel(firstFrame, other, label, opts = {}) {
   const box = label || { x: 200, y: 400, w: 320, h: 200 };
-  const crop = `crop=${box.w}:${box.h}:${box.x}:${box.y},format=gray`;
-  const args = ['-i', firstFrame, '-i', other, '-filter_complex', `[0:v]${crop}[a];[1:v]${crop}[b];[a][b]ssim`, '-f', 'null', '-'];
+  const a = await readGray(firstFrame);
+  let b = await readGray(other);
+  const scaleX = b.w / a.w, scaleY = b.h / a.h;
+  if (b.w !== a.w || b.h !== a.h) b = resizeGray(b, a.w, a.h);
+  const tmpl = cropGray(a, box);
+  const match = matchTemplate(b, tmpl, box, opts);
+  return { ...match, srcScaleX: scaleX, srcScaleY: scaleY };
+}
+
+async function ssimFiles(a, b) {
+  const args = ['-i', a, '-i', b, '-filter_complex', '[0:v]format=gray[a];[1:v]format=gray[b];[a][b]ssim', '-f', 'null', '-'];
   const { stdout, stderr } = await new Promise((resolve, reject) => {
     execFile('ffmpeg', args, { timeout: 30000, maxBuffer: 4 * 1024 * 1024 }, (err, stdout, stderr) => {
-      // ssim stats live on stderr; a non-zero exit is still useful if stats printed
       const text = String(stderr || '') + String(stdout || '');
       if (parseSsim(text) != null) return resolve({ stdout, stderr: text });
       if (err) return reject(err);
@@ -559,20 +716,68 @@ async function ssimOnPair(firstFrame, other, label) {
   return { ssim, warped: ssim == null ? false : ssim < LABEL_SSIM_MIN, threshold: LABEL_SSIM_MIN };
 }
 
+async function ssimFixedCrop(firstFrame, other, box) {
+  const crop = `crop=${box.w}:${box.h}:${box.x}:${box.y},format=gray`;
+  const args = ['-i', firstFrame, '-i', other, '-filter_complex', `[0:v]${crop}[a];[1:v]${crop}[b];[a][b]ssim`, '-f', 'null', '-'];
+  const { stdout, stderr } = await new Promise((resolve, reject) => {
+    execFile('ffmpeg', args, { timeout: 30000, maxBuffer: 4 * 1024 * 1024 }, (err, stdout, stderr) => {
+      const text = String(stderr || '') + String(stdout || '');
+      if (parseSsim(text) != null) return resolve({ stdout, stderr: text });
+      if (err) return reject(err);
+      resolve({ stdout, stderr: text });
+    });
+  });
+  const ssim = parseSsim(stderr || stdout);
+  return { ssim, warped: ssim == null ? false : ssim < LABEL_SSIM_MIN, threshold: LABEL_SSIM_MIN, match: { x: box.x, y: box.y, w: box.w, h: box.h, scale: 1, score: null, tracked: false } };
+}
+
+async function ssimAligned(firstFrame, box, other, match) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'labelssim-'));
+  const a = path.join(dir, 'a.png');
+  const b = path.join(dir, 'b.png');
+  try {
+    const sx = match.srcScaleX || 1, sy = match.srcScaleY || 1;
+    const ox = Math.max(0, Math.round(match.x * sx));
+    const oy = Math.max(0, Math.round(match.y * sy));
+    const ow = Math.max(2, Math.round(match.w * sx));
+    const oh = Math.max(2, Math.round(match.h * sy));
+    await ff(['-y', '-i', firstFrame, '-vf', `crop=${box.w}:${box.h}:${box.x}:${box.y},scale=${box.w}:${box.h},format=gray`, '-frames:v', '1', a]);
+    await ff(['-y', '-i', other, '-vf', `crop=${ow}:${oh}:${ox}:${oy},scale=${box.w}:${box.h}:flags=bicubic,format=gray`, '-frames:v', '1', b]);
+    return await ssimFiles(a, b);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// Compare the label crop on the composed first frame with later frames from a clip. Low SSIM => warped label.
+async function labelSimilarity({ firstFrame, other, label, track = true } = {}) {
+  if (!firstFrame || !other || !fs.existsSync(firstFrame) || !fs.existsSync(other)) throw new Error('labelSimilarity needs two image files');
+  return ssimOnPair(firstFrame, other, label, { track });
+}
+
+async function ssimOnPair(firstFrame, other, label, opts = {}) {
+  const box = label || { x: 200, y: 400, w: 320, h: 200 };
+  const track = opts.track !== false;
+  if (!track) return ssimFixedCrop(firstFrame, other, box);
+  const match = await locateLabel(firstFrame, other, box, opts);
+  const compared = await ssimAligned(firstFrame, box, other, match);
+  return { ...compared, match: { ...match, tracked: true } };
+}
+
 async function extractFrame(video, dest, t = 2.5) {
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   await ff(['-y', '-ss', String(t), '-i', video, '-frames:v', '1', dest]);
   return dest;
 }
 
-async function checkLabelWarp({ firstFrame, video, label, times = [1.5, 4.0] } = {}) {
+async function checkLabelWarp({ firstFrame, video, label, times = [1.5, 4.0], track = true } = {}) {
   if (!video || !fs.existsSync(video)) return { warped: false, samples: [] };
   const samples = [];
   let worst = 1;
   for (const t of times) {
     const frame = firstFrame + `.t${t}.png`;
     await extractFrame(video, frame, t);
-    const r = await ssimOnPair(firstFrame, frame, label);
+    const r = await ssimOnPair(firstFrame, frame, label, { track });
     samples.push({ t, ...r, frame });
     if (r.ssim != null && r.ssim < worst) worst = r.ssim;
   }
@@ -655,8 +860,8 @@ module.exports = {
   MODE_ENV, MODE_VALUE, TYPES, GENERIC, CLIP_SECONDS, MAX_CLIPS, LABEL_SSIM_MIN, SURFACE, IN_USE_SURFACE, COMPOSE, CLIP_NAMES, BEATS,
   TUNG_PROMPT_RULES, PROMPT_SYSTEM, BROLL_MODEL_ENV, NEGATION_RE,
   enabled, normalizeType, typeFromName, typeFromMeta, inferType, beatsFor, cleanBeatPrompt, draftBrollSchema,
-  plannedClipCount, clipEstimate, maxPromoUsd, cutoutProduct, composeFirstFrame, inUseSurfaceAvailable, prepareInUseFirstFrame, parseSsim, ssimOnPair, labelSimilarity,
-  extractFrame, checkLabelWarp, staticPushIn, buildClips,
+  plannedClipCount, clipEstimate, maxPromoUsd, cutoutProduct, composeFirstFrame, inUseSurfaceAvailable, prepareInUseFirstFrame, parseSsim, ssimOnPair, ssimFixedCrop, locateLabel, labelSimilarity,
+  extractFrame, checkLabelWarp, staticPushIn, buildClips, LABEL_SEARCH,
   hasNegation, sentenceCount, parsePromptReply, brollModel, clampClipDuration, assessWrittenClip, jpegBase64,
   writeRunwayPrompts, promptUserText,
 };

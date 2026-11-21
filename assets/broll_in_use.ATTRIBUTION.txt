@@ -1,5 +1,5 @@
-In-use B-roll first-frame background (9:16, 720x1280)
-Source: original still generated for SalonReel (not a third-party stock photograph).
-Purpose: a salon shot of a stylist's hands working product through a seated customer's hair lengths, viewed from behind. Used as the scene-2 first frame with no product composited onto it.
-Notes: No real person is depicted. No logos or readable branding. Not a finished-look reveal.
+In-use B-roll first-frame background (9:16, 1080x1920)
+Source: photoreal still generated for SalonReel with the studio GenerateImage tool on 21 Nov 2026 (America/New_York). The generator produced a 720x1280 frame; it was resized to 1080x1920 with Lanczos. Not a third-party stock photograph.
+Purpose: a salon shot of a seated customer in a salon chair and cape, with a stylist's hands working product through damp, in-progress mid-lengths. Used as the scene-2 first frame with no product composited onto it.
+Notes: No real person is depicted. The customer is shown with a neck, shoulders and upper body, seated in a salon chair. The stylist's hands are attached to the stylist's arms. No logos or readable branding. Not a finished-look reveal. No product bottle or jar in the main frame.
 License: original asset, free to use in SalonReel.
