@@ -86,13 +86,17 @@ test('m31: beatsFor returns 1-2 blocklist-clean product-in-use beats per type', 
     const beats = PB.beatsFor({ type, script: 'press the pump into your palm, then smooth it through the mid-lengths. scoop from the jar. a light mist on the hair.' });
     assert.ok(beats.length >= 1 && beats.length <= 2, `${type} beat count ${beats.length}`);
     assert.ok(beats.length <= PB.MAX_CLIPS);
+    assert.equal(beats.length, 2, `${type} should return product then in-use`);
+    assert.equal(beats[0].scene, 'product');
+    assert.equal(beats[1].scene, 'in-use');
+    assert.match(beats[1].prompt, /hands/i);
+    assert.match(beats[1].prompt, /hair/i);
     for (const b of beats) {
       assert.equal(b.duration, 5);
       assert.equal(b.type, type === PB.GENERIC ? PB.GENERIC : type);
       const chk = A.checkAll({ broll: [{ prompt: b.prompt }] });
       assert.equal(chk.ok, true, `${type} blocked: ${chk.match || ''} :: ${b.prompt}`);
       assert.doesNotMatch(b.prompt, /finished hairstyle|before and after|before\/after/i);
-      assert.match(b.prompt, /hands/i);
     }
   }
   const serum = PB.beatsFor({ type: 'serum', name: 'Repair Serum', script: 'press the pump and smooth it through the lengths' });
@@ -133,6 +137,26 @@ test('m31: compositor places the real product on the 720x1280 marble still', asy
   // Label box sits on the product, used later for the warp check.
   assert.ok(r.label.w > 8 && r.label.h > 8);
   assert.ok(r.label.x >= r.product.x && r.label.x + r.label.w <= r.product.x + r.product.w);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('m31: in-use compositor places the real product at the edge of the sanctioned salon still', async () => {
+  assert.equal(PB.inUseSurfaceAvailable(), true);
+  const dir = tmpDir();
+  const product = makeProduct({ dest: path.join(dir, 'serum.jpg'), kind: 'serum' });
+  const out = path.join(dir, 'in_use.png');
+  const r = await PB.composeInUseFirstFrame({ productFile: product, out });
+  assert.equal(r.width, 720); assert.equal(r.height, 1280);
+  assert.deepEqual(probeWxH(out), { w: 720, h: 1280 });
+  assert.equal(r.product.baseY, PB.IN_USE_COMPOSE.baseY);
+  assert.equal(r.product.x, PB.IN_USE_COMPOSE.x);
+  assert.ok(r.product.w <= PB.IN_USE_COMPOSE.maxW);
+  assert.ok(r.product.h <= PB.IN_USE_COMPOSE.maxH);
+  assert.ok(r.product.x >= 0 && r.product.x + r.product.w <= 720);
+  assert.ok(r.label.w > 8 && r.label.h > 8);
+  assert.ok(r.label.x >= r.product.x && r.label.x + r.label.w <= r.product.x + r.product.w);
+  const a = fs.readFileSync(out), b = fs.readFileSync(PB.IN_USE_SURFACE);
+  assert.notEqual(a.length, b.length);
   fs.rmSync(dir, { recursive: true, force: true });
 });
 

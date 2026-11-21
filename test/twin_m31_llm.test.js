@@ -15,12 +15,19 @@ function tinyJpeg(dest) {
   execFileSync('ffmpeg', ['-y', '-f', 'lavfi', '-i', 'color=white:s=64x64', '-frames:v', '1', dest], { stdio: 'pipe' });
   return dest;
 }
+function makeProduct(dest, kind = 'serum') {
+  const body = kind === 'mask'
+    ? 'drawbox=60:260:280:280:color=0xC4B09A:t=fill,drawbox=110:340:180:120:color=0xF4F0E6:t=fill'
+    : 'drawbox=130:80:140:80:color=0xF2F2F2:t=fill,drawbox=120:160:160:420:color=0xD9C48A:t=fill,drawbox=145:260:110:140:color=0xF4F0E6:t=fill';
+  execFileSync('ffmpeg', ['-y', '-f', 'lavfi', '-i', 'color=white:s=400x640', '-vf', body, '-frames:v', '1', dest], { stdio: 'pipe' });
+  return dest;
+}
 const validClip = (prompt, extra = {}) => ({
   prompt, duration: 5, ratio: '720:1280', rationale: 'motion only', ...extra,
 });
 const VALID = [
-  validClip('The camera eases in as window light drifts across the label.'),
-  validClip('The camera holds as a slow shimmer moves through the liquid.'),
+  validClip('The camera eases in as window light drifts across the label.', { scene: 'product' }),
+  validClip('The camera holds as a stylist\'s hands smooth the product through the mid-lengths of a seated customer\'s hair.', { scene: 'in-use' }),
 ];
 function pack(clips) { return JSON.stringify({ clips }); }
 
@@ -37,8 +44,12 @@ Rules:
 Return JSON: {"prompt", "duration": 5|10, "ratio": "720:1280",
 "rationale"}`;
 
-test('m31 llm: system prompt is Tung\'s text verbatim', () => {
-  assert.equal(PB.PROMPT_SYSTEM, VERBATIM);
+test('m31 llm: system prompt keeps Tung\'s rules verbatim and requires product then in-use scenes', () => {
+  assert.equal(PB.TUNG_PROMPT_RULES, VERBATIM);
+  assert.ok(PB.PROMPT_SYSTEM.startsWith(VERBATIM));
+  assert.match(PB.PROMPT_SYSTEM, /Scene 1 \(product\)/);
+  assert.match(PB.PROMPT_SYSTEM, /Scene 2 \(in-use\)/);
+  assert.match(PB.PROMPT_SYSTEM, /stylist'?s hands apply the product to a seated customer'?s hair/i);
 });
 
 test('m31 llm: broll model defaults to gen4_turbo; gen4.5 only inside the $1 cap and ledger remainder', () => {
@@ -78,10 +89,14 @@ test('m31 llm: a valid JSON response becomes two planned clips with rationale st
     assert.ok(images.length >= 1);
     assert.match(text, /Repair Serum/);
     assert.match(text, /serum/);
+    assert.match(text, /Scene 1 is the product scene/);
+    assert.match(text, /Scene 2 is the in-use scene/);
+    assert.ok(images.length >= 2, "product still plus in-use still (and optional product photo)");
     return pack(VALID);
   };
+  const inUse = tinyJpeg(path.join(dir, 'inuse.jpg'));
   const r = await PB.writeRunwayPrompts({
-    firstFrame: first, productFile: product, name: 'Olya Atelier — Repair Serum', type: 'serum',
+    firstFrame: first, inUseFirstFrame: inUse, productFile: product, name: 'Olya Atelier — Repair Serum', type: 'serum',
     script: 'A light pump, then smooth through the mid-lengths.', count: 2,
   }, { llm, env: {} });
   assert.equal(r.source, 'llm');
@@ -91,6 +106,8 @@ test('m31 llm: a valid JSON response becomes two planned clips with rationale st
   assert.equal(r.clips.length, 2);
   assert.equal(r.clips[0].prompt, VALID[0].prompt);
   assert.equal(r.clips[1].prompt, VALID[1].prompt);
+  assert.equal(r.clips[0].scene, 'product');
+  assert.equal(r.clips[1].scene, 'in-use');
   assert.equal(r.clips[0].rationale, 'motion only');
   assert.equal(r.clips[0].duration, 5);
   assert.equal(r.clips[0].ratio, '720:1280');
@@ -203,3 +220,36 @@ test('m31 llm: planned cost per promo is $0.50 on gen4_turbo 5s and $1.20 on gen
   assert.equal(RWC.estimateCost({ model: 'gen4.5', duration: 5 }).usd * 2, 1.2);
   assert.equal(PB.maxPromoUsd('gen4.5'), 1.2);
 });
+
+test('m31 llm: buildClips uses the product still for scene 1 and the in-use still for scene 2', async () => {
+  const dir = tmpDir();
+  const product = makeProduct(path.join(dir, 'product.jpg'));
+  const llm = async ({ text, images }) => {
+    assert.ok(images.length >= 2);
+    assert.match(text, /in-use scene/i);
+    return pack(VALID);
+  };
+  const clips = await PB.buildClips(
+    { productFile: product, type: 'serum', name: 'Repair Serum', script: 'smooth through the mid-lengths', clipSeconds: 5 },
+    {
+      dir, llm, env: {},
+      runwayClip: async ({ dest, still }) => {
+        fs.copyFileSync(still, dest.replace(/\.mp4$/, '_still_used.png'));
+        const { execFileSync } = require('child_process');
+        execFileSync('ffmpeg', ['-y', '-f', 'lavfi', '-i', 'color=0x445566:s=720x1280:d=0.3', '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-preset', 'veryfast', '-t', '0.3', '-an', dest], { stdio: 'pipe' });
+        return { file: dest, reused: false };
+      },
+      checkWarp: async () => ({ warped: false, ssim: 0.99, threshold: PB.LABEL_SSIM_MIN, samples: [] }),
+    },
+  );
+  assert.equal(clips.length, 2);
+  assert.equal(clips[0].scene, 'product');
+  assert.equal(clips[1].scene, 'in-use');
+  assert.ok(clips[0].still.endsWith('broll_a_still.png'));
+  assert.ok(clips[1].still.endsWith('broll_b_still.png'));
+  const a = fs.readFileSync(clips[0].still);
+  const b = fs.readFileSync(clips[1].still);
+  assert.notEqual(a.equals(b), true, 'product and in-use first frames must differ');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
