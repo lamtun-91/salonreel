@@ -132,3 +132,13 @@ test('m2: renderHeygen end-to-end with a mocked HeyGen (real ffmpeg), raw clip r
   assert.throws(() => TR.heygenIds({ avatar: { sample: false } }, hg, {}), /no HeyGen look/);
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('m2: Dockerfile copies every local module the server requires (M2 deploy once failed on a missing file)', () => {
+  const ROOT = path.join(__dirname, '..');
+  const line = fs.readFileSync(path.join(ROOT, 'Dockerfile'), 'utf8').split('\n').find(l => /^COPY server\.js /.test(l));
+  const copied = new Set(line.split(/\s+/).slice(1, -1));
+  const seen = new Set(), todo = ['server.js'];
+  while (todo.length) { const f = todo.pop(); if (seen.has(f)) continue; seen.add(f);
+    for (const m of fs.readFileSync(path.join(ROOT, f), 'utf8').matchAll(/require\('\.\/([\w.-]+?)(\.js)?'\)/g)) todo.push(m[1] + '.js'); }
+  for (const f of seen) assert.ok(copied.has(f), `${f} is required but not COPYed in Dockerfile`);
+});
